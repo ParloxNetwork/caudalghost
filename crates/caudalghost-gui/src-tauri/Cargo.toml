@@ -1,0 +1,28 @@
+[package]
+name = "caudalghost-gui"
+version = "0.2.0"
+description = "Monitor de uso de red: qué apps y a qué servidores consume tu conexión. Solo observa, no es firewall."
+authors = ["Parlox Network"]
+edition = "2021"
+license = "AGPL-3.0-only"
+
+# Workspace standalone: NO forma parte del workspace Cargo principal, para que
+# `cargo test` (sin --workspace) del backend nunca construya webkit/tauri.
+[workspace]
+
+[lib]
+name = "caudalghost_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = "0.4"
+caudalghost-core = { path = "../../caudalghost-core" }
+if-addrs = "0.15"

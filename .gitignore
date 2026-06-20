@@ -1,0 +1,21 @@
+# Notas de trabajo locales (no versionar)
+_local/
+
+# Artefactos de build de Rust/Cargo (todos los workspaces, incl. src-tauri)
+/target
+target/
+**/target/
+
+# Dependencias y artefactos del frontend / Tauri
+node_modules/
+**/node_modules/
+.svelte-kit/
+**/.svelte-kit/
+crates/caudalghost-gui/build/
+
+# Paquetes generados
+*.deb
+
+# Basura de SO / editores
+.DS_Store
+*.swp

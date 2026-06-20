@@ -1,0 +1,91 @@
+[package]
+name = "caudalghostd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage = "https://caudalghost.parlox.net"
+
+[dependencies]
+caudalghost-core = { path = "../caudalghost-core" }
+caudalghost-ebpf-common = { path = "../caudalghost-ebpf-common", features = ["user"] }
+anyhow.workspace = true
+aya.workspace = true
+posix-acl.workspace = true
+clap.workspace = true
+rusqlite.workspace = true
+sd-notify.workspace = true
+serde_json.workspace = true
+signal-hook.workspace = true
+
+[build-dependencies]
+aya-build.workspace = true
+anyhow.workspace = true
+cargo_metadata.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[package.metadata.deb]
+name = "caudalghost"
+maintainer = "Parlox Network <jonathan@parlox.net>"
+copyright = "2026, Parlox Network. AGPL-3.0-only (pieza eBPF GPL-2.0)."
+license-file = ["../../LICENSE", "0"]
+section = "net"
+priority = "optional"
+# Escritorio y servidor no conviven en la misma máquina (mismos binarios/unit).
+conflicts = "caudalghost-server"
+replaces = "caudalghost-server"
+# $auto = libs detectadas por ldd; systemd para el servicio; libs GUI (Tauri/WebKit).
+depends = "$auto, systemd, libwebkit2gtk-4.1-0, libgtk-3-0"
+extended-description = """\
+CaudalGhost — monitor de uso de red para Linux de escritorio. Telemetría pura \
+(solo observa, no es firewall): mide por interfaz y por aplicación (eBPF), con \
+histórico escalonado en SQLite y un dashboard en vivo. Este paquete trae el \
+daemon (servicio systemd, sin sudo gracias a CAP_BPF/CAP_PERFMON), la CLI y la GUI de escritorio."""
+# La unit la instala [systemd-units]; aquí van binarios + fragmentos.
+assets = [
+    ["../../target/release/caudalghostd", "usr/sbin/", "755"],
+    ["../../target/release/caudalghost", "usr/bin/", "755"],
+    ["../../dist/sysusers.d/caudalghost.conf", "usr/lib/sysusers.d/", "644"],
+    ["../../dist/polkit/10-caudalghost-resolved.rules", "usr/share/polkit-1/rules.d/", "644"],
+    ["../../dist/README.md", "usr/share/doc/caudalghost/README.md", "644"],
+    ["../../crates/caudalghost-gui/src-tauri/target/release/caudalghost-gui", "usr/bin/", "755"],
+    ["../../dist/applications/caudalghost-gui.desktop", "usr/share/applications/", "644"],
+    ["../../crates/caudalghost-gui/src-tauri/icons/32x32.png", "usr/share/icons/hicolor/32x32/apps/caudalghost-gui.png", "644"],
+    ["../../crates/caudalghost-gui/src-tauri/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/caudalghost-gui.png", "644"],
+    ["../../crates/caudalghost-gui/src-tauri/icons/128x128@2x.png", "usr/share/icons/hicolor/256x256/apps/caudalghost-gui.png", "644"],
+    ["../../dist/metainfo/net.parlox.caudalghost.metainfo.xml", "usr/share/metainfo/", "644"],
+]
+maintainer-scripts = "debian/"
+
+[package.metadata.deb.systemd-units]
+unit-name = "caudalghostd"
+unit-scripts = "../../dist/systemd"
+enable = true
+start = true
+
+# --- Variante SERVIDOR (headless, sin GUI) -------------------------------
+# Build:  cargo deb --variant server
+# Genera caudalghost-server_<ver>_amd64.deb: solo daemon + CLI, sin WebKit/GTK.
+# Hereda maintainer/copyright/license/section/scripts/systemd-units de arriba;
+# aquí solo cambiamos lo que difiere del paquete de escritorio.
+[package.metadata.deb.variants.server]
+name = "caudalghost-server"
+# Sin libs gráficas: $auto solo verá las deps reales del daemon y la CLI.
+depends = "$auto, systemd"
+conflicts = "caudalghost"
+replaces = "caudalghost"
+extended-description = """\
+CaudalGhost (edición servidor, sin GUI) — monitor de uso de red para Linux. \
+Telemetría pura (solo observa, no es firewall): mide por interfaz y por \
+aplicación (eBPF), con histórico escalonado en SQLite. Este paquete trae solo \
+el daemon (servicio systemd, sin sudo gracias a CAP_BPF/CAP_PERFMON) y la CLI \
+`caudalghost`, sin dependencias gráficas. Pensado para headless."""
+# Igual que el de escritorio, pero SIN binario GUI, .desktop, iconos ni metainfo.
+assets = [
+    ["../../target/release/caudalghostd", "usr/sbin/", "755"],
+    ["../../target/release/caudalghost", "usr/bin/", "755"],
+    ["../../dist/sysusers.d/caudalghost.conf", "usr/lib/sysusers.d/", "644"],
+    ["../../dist/polkit/10-caudalghost-resolved.rules", "usr/share/polkit-1/rules.d/", "644"],
+    ["../../dist/README.md", "usr/share/doc/caudalghost-server/README.md", "644"],
+]

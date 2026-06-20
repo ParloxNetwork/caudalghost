@@ -1,0 +1,11 @@
+@import './tokens.css';
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--cg-bg);
+  color: var(--cg-text);
+  font-family: var(--cg-font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}

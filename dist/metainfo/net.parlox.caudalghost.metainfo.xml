@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Parlox Network -->
+<component type="desktop-application">
+  <id>net.parlox.caudalghost</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <name>CaudalGhost</name>
+  <summary>Monitor de uso de red por aplicación y servidor</summary>
+  <description>
+    <p>
+      CaudalGhost mide tu uso de red por interfaz y por aplicación (eBPF), con
+      histórico escalonado en SQLite y un dashboard en vivo. Telemetría pura:
+      solo observa, no es un firewall y nada llama a casa.
+    </p>
+  </description>
+  <launchable type="desktop-id">caudalghost-gui.desktop</launchable>
+  <url type="homepage">https://caudalghost.parlox.net</url>
+  <developer id="net.parlox">
+    <name>Parlox Network</name>
+  </developer>
+  <provides>
+    <binary>caudalghost-gui</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>

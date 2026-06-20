@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width="100" height="120" role="img" aria-label="CaudalGhost">
+  <title>CaudalGhost — la gota que observa</title>
+  <defs>
+    <radialGradient id="cg-body" cx="50%" cy="38%" r="72%">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#0E7490" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#06222A" stop-opacity="0.30"/>
+    </radialGradient>
+    <linearGradient id="cg-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="0.5" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <radialGradient id="cg-eye" cx="50%" cy="44%" r="55%">
+      <stop offset="0" stop-color="#ECFEFF"/>
+      <stop offset="34%" stop-color="#A7F3EE"/>
+      <stop offset="70%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- cuerpo de la gota: agua profunda con luz de borde -->
+  <path d="M50 15 C53 28 74 50 74 75 a24 25 0 1 1 -48 0 C26 50 47 28 50 15 Z"
+        fill="url(#cg-body)" stroke="url(#cg-rim)" stroke-width="2.6"/>
+  <!-- voluta fantasma en la punta -->
+  <path d="M50 15 c5 5 2.5 12 -3.5 13" fill="none" stroke="#67E8F9" stroke-width="2.2" stroke-linecap="round" opacity="0.55"/>
+  <!-- marcas de aforo -->
+  <g stroke="#7DD3FC" stroke-width="1.5" stroke-linecap="round" opacity="0.5">
+    <line x1="36" y1="88" x2="44" y2="88"/><line x1="56" y1="88" x2="64" y2="88"/>
+    <line x1="38" y1="96" x2="44" y2="96"/><line x1="56" y1="96" x2="62" y2="96"/>
+  </g>
+  <!-- el ojo: bloom + halo + núcleo + catchlight -->
+  <circle cx="50" cy="72" r="16" fill="url(#cg-eye)" opacity="0.88"/>
+  <circle cx="50" cy="72" r="9.5" fill="none" stroke="#5EEAD4" stroke-width="1" opacity="0.4"/>
+  <circle cx="50" cy="72" r="5" fill="#ECFEFF"/>
+  <circle cx="47.6" cy="69.6" r="1.5" fill="#FFFFFF"/>
+</svg>

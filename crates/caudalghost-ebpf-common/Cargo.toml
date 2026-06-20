@@ -1,0 +1,12 @@
+[package]
+name = "caudalghost-ebpf-common"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+
+[features]
+default = []
+user = ["dep:aya"]
+
+[dependencies]
+aya = { workspace = true, optional = true }

@@ -1,0 +1,74 @@
+[Unit]
+Description=CaudalGhost — daemon de telemetría de red (solo observa)
+After=network.target systemd-resolved.service
+
+# Freno de reinicios: si el daemon cae 5 veces en 60 s, systemd lo deja en
+# 'failed' (estado claro y honesto) en vez de 'activating (auto-restart)' eterno
+# —que aparenta estar vivo y confunde al usuario— y deja de quemar CPU. Con el
+# arreglo de idempotencia del rollup esto no debería dispararse; es la red de
+# seguridad para cualquier otro fallo fatal de arranque.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/sbin/caudalghostd --db /var/lib/caudalghost/caudal.db --socket /run/caudalghost/caudalghost.sock
+Restart=on-failure
+RestartSec=2
+WatchdogSec=30s
+
+# Identidad: usuario/grupo de sistema dedicado (sysusers.d), nunca root pleno.
+User=caudalghost
+Group=caudalghost
+
+# La ÚNICA elevación: dos capacidades en vez de sudo.
+AmbientCapabilities=CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON
+NoNewPrivileges=yes
+
+# Directorios con dueño del servicio (resuelven la base root-owned y el socket).
+StateDirectory=caudalghost
+StateDirectoryMode=0750
+RuntimeDirectory=caudalghost
+# 0755: cualquiera atraviesa al socket; el socket 0660+ACL gatilla el acceso (D11).
+RuntimeDirectoryMode=0755
+
+# Syscalls: baseline de servicio + las dos que exige eBPF. bpf() vive en
+# @privileged y perf_event_open() en ningún grupo por defecto → explícitas.
+# NUNCA usar el idioma denylist ~@privileged: mata bpf().
+SystemCallFilter=@system-service bpf perf_event_open
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# Familias de sockets: AF_UNIX (API local) + AF_NETLINK (aya/libbpf). Nada más.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# Endurecimiento (verificado compatible con eBPF kprobe).
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ProtectProc=default
+UMask=0027
+# Extra seguro para un daemon que no abre /dev/* ni usa BPF de cgroup:
+ProtectHostname=yes
+RemoveIPC=yes
+PrivateDevices=yes
+
+# NO poner (rompen eBPF kprobe): MemoryDenyWriteExecute=yes (W^X mata el JIT),
+# PrivateUsers=yes / user-namespacing (tracing BPF no carga en userns),
+# DynamicUser=yes (persistencia DB + socket entre usuarios),
+# CapabilityBoundingSet vacío, SystemCallFilter=~@privileged/~@resources.
+# ProtectProc=invisible tampoco: rompe la atribución tgid→app que lee /proc.
+
+[Install]
+WantedBy=multi-user.target

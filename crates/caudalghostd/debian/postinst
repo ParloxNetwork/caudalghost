@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+# Crea el usuario/grupo de sistema `caudalghost` ANTES de que el servicio
+# arranque (el marcador de debhelper de abajo inyecta el daemon-reload +
+# enable + start que genera cargo-deb). Idempotente.
+if [ "$1" = "configure" ]; then
+    if command -v systemd-sysusers >/dev/null 2>&1; then
+        systemd-sysusers /usr/lib/sysusers.d/caudalghost.conf || true
+    fi
+    # Añade al usuario que instala al grupo caudalghost (fallback; el ACL ya da acceso por UID).
+    target_user="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+    if [ -n "$target_user" ] && getent group caudalghost >/dev/null 2>&1; then
+        usermod -aG caudalghost "$target_user" || true
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0

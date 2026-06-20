@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CaudalGhost
+Comment=Monitor de uso de red: qué apps y a qué servidores consume tu conexión. Solo observa, no es firewall.
+Exec=caudalghost-gui
+Icon=caudalghost-gui
+Terminal=false
+Categories=Network;Monitor;Utility;
+StartupWMClass=caudalghost-gui

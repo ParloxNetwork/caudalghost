@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="CaudalGhost">
+  <defs>
+    <radialGradient id="fav-bg" cx="40%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#11414C"/><stop offset="55%" stop-color="#0A1014"/><stop offset="100%" stop-color="#05080B"/>
+    </radialGradient>
+    <linearGradient id="fav-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67E8F9"/><stop offset="0.5" stop-color="#2DD4BF"/><stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <radialGradient id="fav-eye" cx="50%" cy="44%" r="55%">
+      <stop offset="0" stop-color="#ECFEFF"/><stop offset="40%" stop-color="#5EEAD4"/><stop offset="100%" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#fav-bg)"/>
+  <!-- gota simplificada (legible a 16px) -->
+  <path d="M32 13 C34 21 47 33 47 45 a15 15 0 1 1 -30 0 C17 33 30 21 32 13 Z"
+        fill="none" stroke="url(#fav-rim)" stroke-width="2.8"/>
+  <circle cx="32" cy="44" r="10" fill="url(#fav-eye)"/>
+  <circle cx="32" cy="44" r="3.6" fill="#ECFEFF"/>
+</svg>

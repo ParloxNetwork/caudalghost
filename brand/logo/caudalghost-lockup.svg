@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" width="360" height="96" role="img" aria-label="CaudalGhost">
+  <title>CaudalGhost — lockup</title>
+  <defs>
+    <radialGradient id="lk-body" cx="50%" cy="38%" r="72%">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#0E7490" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#06222A" stop-opacity="0.30"/>
+    </radialGradient>
+    <linearGradient id="lk-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67E8F9"/><stop offset="0.5" stop-color="#2DD4BF"/><stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <radialGradient id="lk-eye" cx="50%" cy="44%" r="55%">
+      <stop offset="0" stop-color="#ECFEFF"/><stop offset="34%" stop-color="#A7F3EE"/><stop offset="70%" stop-color="#2DD4BF"/><stop offset="100%" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- marca refinada (escalada) -->
+  <g transform="translate(8,-3) scale(0.78)" stroke-linecap="round">
+    <path d="M50 15 C53 28 74 50 74 75 a24 25 0 1 1 -48 0 C26 50 47 28 50 15 Z" fill="url(#lk-body)" stroke="url(#lk-rim)" stroke-width="2.6"/>
+    <path d="M50 15 c5 5 2.5 12 -3.5 13" fill="none" stroke="#67E8F9" stroke-width="2.2" opacity="0.55"/>
+    <circle cx="50" cy="72" r="16" fill="url(#lk-eye)" opacity="0.88"/>
+    <circle cx="50" cy="72" r="5" fill="#ECFEFF"/>
+    <circle cx="47.6" cy="69.6" r="1.5" fill="#FFFFFF"/>
+  </g>
+  <!-- wordmark -->
+  <text x="96" y="58" font-family="'Space Grotesk', system-ui, sans-serif" font-weight="700" font-size="38" letter-spacing="-1">
+    <tspan fill="#E6EDF3">Caudal</tspan><tspan fill="#22D3EE">Ghost</tspan>
+  </text>
+</svg>

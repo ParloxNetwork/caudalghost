@@ -1,0 +1,47 @@
+/* CaudalGhost — Design tokens
+ * Sistema "Agua profunda". Tema oscuro (primario). Fuente de verdad: brand/BRAND.md
+ * y _local/specs/2026-06-12-caudalghost-marca-identidad.md
+ */
+:root {
+  /* Superficies */
+  --cg-bg: #0A1014;            /* fondo base (agua profunda) */
+  --cg-surface: #111C22;       /* paneles, tarjetas */
+  --cg-surface-elev: #16242C;  /* elementos elevados (popovers, tooltips) */
+  --cg-titlebar: #0D161B;      /* barra de título / cromo (entre bg y surface) */
+  --cg-border: #1D2D34;        /* bordes / hairlines */
+
+  /* Texto */
+  --cg-text: #E6EDF3;          /* primario */
+  --cg-text-secondary: #7C93A0;/* secundario, labels */
+  --cg-text-tertiary: #5A7079; /* terciario, pistas tenues */
+
+  /* Acento agua */
+  --cg-accent: #22D3EE;        /* acento primario (cyan agua) */
+  --cg-accent-bright: #67E8F9; /* realces, brillo */
+  --cg-accent-deep: #0E7490;   /* profundidad, gradientes */
+  --cg-on-accent: #04201C;     /* texto/ícono sobre el acento (verde-agua muy oscuro) */
+
+  /* Caudal (datos de dirección) */
+  --cg-rx: #22D3EE;            /* ↓ descarga (cyan = agua que entra) */
+  --cg-tx: #F59E0B;            /* ↑ subida (ámbar, par frío/cálido) */
+  --cg-rx-live: #2DD4BF;       /* la vista en vivo sube el brillo (bioluminiscente) */
+
+  /* Categórico (apps / interfaces — evita cyan y ámbar) */
+  --cg-cat-1: #818CF8;         /* índigo */
+  --cg-cat-2: #A78BFA;         /* violeta */
+  --cg-cat-3: #E879F9;         /* magenta */
+  --cg-cat-4: #FB7185;         /* rosa */
+  --cg-cat-5: #A3E635;         /* lima */
+  --cg-cat-other: #64748B;     /* "otros" / desborde (pizarra) */
+
+  /* Semánticos */
+  --cg-ok: #34D399;            /* eBPF activo, conectado */
+  --cg-warn: #FACC15;          /* eBPF inactivo, avisos */
+  --cg-error: #F87171;         /* sin conexión, error */
+  --cg-parlox-signature: #E3262E; /* SOLO el corazón de la firma del fabricante */
+
+  /* Tipografía */
+  --cg-font-display: "Space Grotesk", system-ui, sans-serif; /* wordmark, títulos */
+  --cg-font-ui: "Inter", system-ui, sans-serif;              /* UI, cuerpo */
+  --cg-font-mono: "JetBrains Mono", ui-monospace, monospace; /* números (tabulares) */
+}

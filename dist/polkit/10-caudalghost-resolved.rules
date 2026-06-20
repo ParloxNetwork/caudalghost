@@ -1,0 +1,10 @@
+// CaudalGhost (F5) — autoriza SOLO al usuario de sistema `caudalghost` a
+// suscribirse al monitor de systemd-resolved, para resolver IPs→hostnames
+// (F4) sin sudo. Probado: esa acción está gateada por polkit, no por UID.
+// Concede una única acción; nada más. Se instala en /usr/share/polkit-1/rules.d/.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.resolve1.subscribe-query-results" &&
+        subject.user == "caudalghost") {
+        return polkit.Result.YES;
+    }
+});
