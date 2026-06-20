@@ -11,11 +11,16 @@ if [ "$1" = "configure" ]; then
     # Añade al usuario que instala al grupo caudalghost (fallback; el ACL ya da acceso por UID).
     target_user="${SUDO_USER:-$(logname 2>/dev/null || true)}"
     # Endurecimiento (H-5): $SUDO_USER lo controla quien invoca el paquete y aquí
-    # corremos como root. Rechazamos lo que no sea un nombre de usuario POSIX
-    # plausible (vacío, con pinta de opción, o con metacaracteres) para evitar
-    # inyección de opciones a usermod; además usamos '--' como fin de opciones.
+    # corremos como root. La defensa real contra inyección es pasar el nombre
+    # ENTRE COMILLAS y tras '--' (fin de opciones), de modo que usermod lo trate
+    # siempre como un único argumento literal. Como defensa en profundidad
+    # rechazamos lo vacío, lo que tenga pinta de opción (empieza por '-') o con
+    # metacaracteres de shell; pero PERMITIMOS los caracteres de nombres reales de
+    # empresa (Kerberos `user@realm`, Samba `dom+user`/`machine$`) para no excluir
+    # usuarios legítimos. (NetBIOS `DOM\user` queda fuera; ese caso accede igual
+    # por el ACL por-UID.)
     case "$target_user" in
-        '' | -* | *[!a-zA-Z0-9_.-]*) target_user='' ;;
+        '' | -* | *[!a-zA-Z0-9_.@+$-]*) target_user='' ;;
     esac
     if [ -n "$target_user" ] && getent group caudalghost >/dev/null 2>&1; then
         usermod -aG caudalghost -- "$target_user" || true

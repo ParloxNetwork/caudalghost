@@ -42,6 +42,7 @@ check_has() {   # $1=descripcion $2=salida $3=patron
 }
 
 check_has   "usuario válido se añade con guard '--'"        "$(run_case 'alice')"        '-aG caudalghost -- alice'
+check_has   "usuario empresarial @ (Kerberos/SSSD) aceptado" "$(run_case 'jdoe@corp.example.com')" '-- jdoe@corp.example.com'
 check_empty "SUDO_USER con pinta de opción (-p) rechazado"  "$(run_case '-p toor root')"
 check_empty "SUDO_USER con metacaracteres rechazado"        "$(run_case 'a;b$(id)')"
 check_empty "SUDO_USER vacío no invoca usermod"             "$(run_case '')"
