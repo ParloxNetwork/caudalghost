@@ -44,7 +44,8 @@ Nada remotamente explotable. Detalle completo en `_local/plans/2026-06-20-securi
   *Identificado:* `csp: null` en Tauri (sin defensa en profundidad) y un `innerHTML` latente en el tooltip del
   chart (`tauri.conf.json`, `Chart.svelte`, CWE-79).
   *Arreglado:* CSP estricta (`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, `connect-src`
-  solo IPC) y tooltip con DOM seguro (`textContent`). (commit `cdd6ea0`) — *ver «Pendiente» (smoke-test).*
+  solo IPC) y tooltip con DOM seguro (`textContent`). (commit `cdd6ea0`) — *smoke-test visual de la build de
+  producción: OK (fuentes, gráfico en vivo y paneles renderizan; la CSP no rompe nada).*
 - **H-5 · `$SUDO_USER` sin sanear en `postinst` (root).**
   *Identificado:* `usermod -aG caudalghost $SUDO_USER` con valor influenciable → inyección de opciones (CWE-88).
   *Arreglado:* `usermod ... -- "$user"` + guard de charset (permite usuarios de empresa Kerberos/Samba, rechaza
@@ -82,10 +83,12 @@ necesario por la hidratación inline de SvelteKit). (commits `e58be07`, `4dade72
 
 ### Pendiente antes de publicar 0.3.0
 
-- **Smoke-test visual de la GUI**: confirmar que la CSP nueva no rompe el render (no verificable headless).
+- ~~Smoke-test visual de la GUI~~ → **hecho**: build de producción verificada visualmente, la CSP no rompe el render.
 - ~~Política del `.deb` servidor~~ → **resuelto**: server arranca OFF (solo grupo); ON es opt-in intencional
   vía `systemctl edit` y el daemon lo avisa en el log.
-- Antes del release: subir versión en `Cargo.toml`, reempacar **ambas** `.deb` (`scripts/build-debs.sh`), firmar y push.
+- **Release (mecánico, cuando decidas):** subir versión en `Cargo.toml`, reempacar **ambas** `.deb`
+  (`scripts/build-debs.sh`), firmar y push; aplicar el borrador de docs del repo web
+  (`px-caudalghost-web/_local/plans/2026-06-20-docs-acceso-servidor-0.3.0.md`).
 
 ### Rollback
 
