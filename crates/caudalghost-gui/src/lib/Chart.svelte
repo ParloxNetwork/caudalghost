@@ -52,10 +52,19 @@
             tipEl.style.display = 'flex';
             tipEl.style.left = `${o.left - wr.left + left}px`;
             tipEl.style.top = `${o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0)}px`;
-            tipEl.innerHTML =
-              `<span class="tt">${fmtTime(xv)}</span>` +
-              `<span class="tr">↓ ${formatUnits(rxv, units)}</span>` +
-              `<span class="tx">↑ ${formatUnits(txv, units)}</span>`;
+            // DOM seguro en vez de innerHTML: textContent escapa por construcción,
+            // así ninguna salida de fmtTime/formatUnits puede interpretarse como HTML.
+            const span = (cls: string, text: string): HTMLSpanElement => {
+              const s = document.createElement('span');
+              s.className = cls;
+              s.textContent = text;
+              return s;
+            };
+            tipEl.replaceChildren(
+              span('tt', fmtTime(xv)),
+              span('tr', `↓ ${formatUnits(rxv, units)}`),
+              span('tx', `↑ ${formatUnits(txv, units)}`),
+            );
           },
         ],
       },
