@@ -37,3 +37,10 @@ aya-ebpf = "0.1"
 cargo_metadata = "0.23"
 sd-notify = "0.4"
 posix-acl = "1.2"
+
+[profile.release]
+# Strip de símbolos: binarios shippeados más pequeños y sin tabla de símbolos
+# (H-9b). Nota: el remapeo completo de rutas de build embebidas en literales
+# (panics de deps con /home/<dev>/.cargo/...) requeriría `trim-paths` (nightly en
+# Cargo 1.96) o `--remap-path-prefix` en el pipeline de build; queda recomendado.
+strip = true

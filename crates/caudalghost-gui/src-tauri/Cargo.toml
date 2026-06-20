@@ -25,3 +25,8 @@ anyhow = "1"
 chrono = "0.4"
 caudalghost-core = { path = "../../caudalghost-core" }
 if-addrs = "0.15"
+
+[profile.release]
+# Strip de símbolos en el binario GUI shippeado (consistente con el workspace
+# raíz): más pequeño y sin rutas absolutas de build embebidas (H-9b).
+strip = true
