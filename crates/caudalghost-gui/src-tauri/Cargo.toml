@@ -1,6 +1,6 @@
 [package]
 name = "caudalghost-gui"
-version = "0.2.0"
+version = "0.3.0"
 description = "Monitor de uso de red: qué apps y a qué servidores consume tu conexión. Solo observa, no es firewall."
 authors = ["Parlox Network"]
 edition = "2021"
