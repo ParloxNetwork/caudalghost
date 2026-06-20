@@ -239,6 +239,11 @@ pub fn insert_minute_app_remote(
 /// `app=Some(x)` → solo esa app. Mismas 3 ramas por capa que `query_total`,
 /// agrupando por `remote` y ordenando por tráfico desc. Retención remoto
 /// desacoplada (minuto 7 d, hora 90 d) vía `REMOTE_*_RETENTION_SECS`.
+/// Tope de filas del top de remotos. La consulta ya ordena por tráfico DESC, así
+/// que es un top-N legítimo; acota el tamaño de la respuesta IPC para rangos
+/// antiguos con muchos hosts distintos.
+const TOP_REMOTES_LIMIT: usize = 200;
+
 pub fn query_top_remotes(
     conn: &Connection,
     start: i64,
@@ -276,7 +281,8 @@ pub fn query_top_remotes(
         )
     };
     let sql = format!(
-        "SELECT remote, SUM(rx), SUM(tx) FROM ({body}) GROUP BY remote ORDER BY SUM(rx)+SUM(tx) DESC"
+        "SELECT remote, SUM(rx), SUM(tx) FROM ({body}) GROUP BY remote \
+         ORDER BY SUM(rx)+SUM(tx) DESC LIMIT {TOP_REMOTES_LIMIT}"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let map = |r: &rusqlite::Row| {
@@ -653,6 +659,27 @@ mod tests {
         assert!(f.iter().any(|(h, rx, _)| h == "github.com" && *rx == 100));
         assert!(f.iter().any(|(h, rx, _)| h == "fastly.net" && *rx == 7));
         assert!(f.iter().all(|(h, _, _)| h != "scdn.co"));
+    }
+
+    #[test]
+    fn top_remotes_acota_el_numero_de_filas() {
+        let conn = mem();
+        let now = 1000i64;
+        // 300 remotos distintos en el minuto en curso → más que el tope.
+        let mut batch = String::new();
+        for i in 0..300 {
+            batch.push_str(&format!(
+                "INSERT INTO minute_app_remote VALUES ({now},'firefox','host{i}.example',{},0);\n",
+                300 - i
+            ));
+        }
+        conn.execute_batch(&batch).unwrap();
+        let rows = query_top_remotes(&conn, 0, now + 1, None, now).unwrap();
+        assert_eq!(
+            rows.len(),
+            TOP_REMOTES_LIMIT,
+            "con 300 hosts y tope {TOP_REMOTES_LIMIT}, deben volver {TOP_REMOTES_LIMIT}"
+        );
     }
 
     #[test]
