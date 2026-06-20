@@ -144,7 +144,10 @@ mod tests {
         // comm con un newline incrustado (un proceso puede fijar su comm).
         let d = fake_proc(31, None, Some("evil\x1bhack"));
         let got = resolve_app(d.path(), 31);
-        assert!(!got.chars().any(|c| c.is_control()), "quedó un control char: {got:?}");
+        assert!(
+            !got.chars().any(|c| c.is_control()),
+            "quedó un control char: {got:?}"
+        );
     }
 
     #[test]

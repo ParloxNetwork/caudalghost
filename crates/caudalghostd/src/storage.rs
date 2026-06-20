@@ -607,15 +607,26 @@ mod tests {
         // El total se preserva: (otros) = preexistente(1000,100) + cola c.com(10,1).
         assert_eq!((otros[0].2, otros[0].3), (1010, 101));
         // Los top-2 reales se conservan intactos.
-        assert!(out.iter().any(|(_, r, rx, tx)| r == "a.com" && *rx == 100 && *tx == 10));
-        assert!(out.iter().any(|(_, r, rx, tx)| r == "b.com" && *rx == 50 && *tx == 5));
+        assert!(out
+            .iter()
+            .any(|(_, r, rx, tx)| r == "a.com" && *rx == 100 && *tx == 10));
+        assert!(out
+            .iter()
+            .any(|(_, r, rx, tx)| r == "b.com" && *rx == 50 && *tx == 5));
 
         // Sin claves (app, remote) duplicadas: la salida es insertable sin colisión.
-        let mut keys: Vec<_> = out.iter().map(|(a, r, _, _)| (a.clone(), r.clone())).collect();
+        let mut keys: Vec<_> = out
+            .iter()
+            .map(|(a, r, _, _)| (a.clone(), r.clone()))
+            .collect();
         let n = keys.len();
         keys.sort();
         keys.dedup();
-        assert_eq!(keys.len(), n, "no debe haber claves (app, remote) duplicadas");
+        assert_eq!(
+            keys.len(),
+            n,
+            "no debe haber claves (app, remote) duplicadas"
+        );
     }
 
     /// `apply_top_n` debe ser idempotente: reaplicarla sobre su propia salida no

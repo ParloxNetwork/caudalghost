@@ -114,13 +114,19 @@ mod tests {
         // Flag CLI --no-acl-active-users: desactiva (prioridad máxima).
         assert!(!grant_active_users(true, None));
         assert!(!grant_active_users(true, Some("1"))); // el flag manda sobre env
-        // Env con valores "falsy" desactiva.
+                                                       // Env con valores "falsy" desactiva.
         for v in ["0", "false", "no", "off", " off "] {
-            assert!(!grant_active_users(false, Some(v)), "env={v:?} debe desactivar");
+            assert!(
+                !grant_active_users(false, Some(v)),
+                "env={v:?} debe desactivar"
+            );
         }
         // Cualquier otro valor de env mantiene el default (conceder).
         for v in ["1", "true", "yes", "", "loquesea"] {
-            assert!(grant_active_users(false, Some(v)), "env={v:?} debe conceder");
+            assert!(
+                grant_active_users(false, Some(v)),
+                "env={v:?} debe conceder"
+            );
         }
     }
 

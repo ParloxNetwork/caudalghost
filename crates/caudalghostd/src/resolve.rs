@@ -25,9 +25,7 @@ const MAX_MONITOR_BUF: usize = 1024 * 1024;
 
 /// ¿Es un hostname aceptable para cachear? No vacío, ≤253 chars y sin controles.
 fn is_acceptable_hostname(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MAX_HOSTNAME_LEN
-        && !name.chars().any(|c| c.is_control())
+    !name.is_empty() && name.len() <= MAX_HOSTNAME_LEN && !name.chars().any(|c| c.is_control())
 }
 
 /// Resuelve un IP remoto a hostname.

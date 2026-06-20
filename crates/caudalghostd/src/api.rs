@@ -430,7 +430,11 @@ mod tests {
             read_request_line(&mut r, &mut s, 100).unwrap(),
             LineOutcome::TooLong
         );
-        assert!(s.len() <= 100, "el buffer no debe exceder el tope: {}", s.len());
+        assert!(
+            s.len() <= 100,
+            "el buffer no debe exceder el tope: {}",
+            s.len()
+        );
     }
 
     #[test]
@@ -439,9 +443,18 @@ mod tests {
         let data = b"{\"cmd\":\"ping\"}\n{\"cmd\":\"ping\"}\n";
         let mut r = BufReader::new(&data[..]);
         let mut s = String::new();
-        assert_eq!(read_request_line(&mut r, &mut s, 64 * 1024).unwrap(), LineOutcome::Line);
-        assert_eq!(read_request_line(&mut r, &mut s, 64 * 1024).unwrap(), LineOutcome::Line);
-        assert_eq!(read_request_line(&mut r, &mut s, 64 * 1024).unwrap(), LineOutcome::Eof);
+        assert_eq!(
+            read_request_line(&mut r, &mut s, 64 * 1024).unwrap(),
+            LineOutcome::Line
+        );
+        assert_eq!(
+            read_request_line(&mut r, &mut s, 64 * 1024).unwrap(),
+            LineOutcome::Line
+        );
+        assert_eq!(
+            read_request_line(&mut r, &mut s, 64 * 1024).unwrap(),
+            LineOutcome::Eof
+        );
     }
 
     #[test]
@@ -451,7 +464,10 @@ mod tests {
         let g2 = lim.try_acquire();
         assert!(g1.is_some() && g2.is_some());
         assert_eq!(lim.active(), 2);
-        assert!(lim.try_acquire().is_none(), "el 3.º debe rechazarse en tope 2");
+        assert!(
+            lim.try_acquire().is_none(),
+            "el 3.º debe rechazarse en tope 2"
+        );
         drop(g1);
         assert_eq!(lim.active(), 1);
         assert!(lim.try_acquire().is_some(), "tras liberar uno hay sitio");
