@@ -14,6 +14,21 @@ const MONITOR_SOCKET: &str = "/run/systemd/resolve/io.systemd.Resolve.Monitor";
 /// uno fijo prudente — las apps re-resuelven y refrescan. Footprint acotado.
 const CACHE_TTL_SECS: i64 = 600;
 const CACHE_CAP: usize = 8_192;
+/// Longitud máxima de un FQDN (RFC 1035). Un hostname del monitor más largo (o
+/// con caracteres de control) es ilegítimo: se descarta antes de cachearlo y
+/// pintarlo, para no inflar la caché ni inyectar control en la UI.
+const MAX_HOSTNAME_LEN: usize = 253;
+/// Tope defensivo del buffer de recepción del monitor varlink: si llega ese
+/// volumen sin un delimitador NUL, el monitor se considera averiado y el resolver
+/// queda inerte (evita crecimiento de memoria sin límite en el daemon).
+const MAX_MONITOR_BUF: usize = 1024 * 1024;
+
+/// ¿Es un hostname aceptable para cachear? No vacío, ≤253 chars y sin controles.
+fn is_acceptable_hostname(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_HOSTNAME_LEN
+        && !name.chars().any(|c| c.is_control())
+}
 
 /// Resuelve un IP remoto a hostname.
 pub trait HostResolver: Send + Sync {
@@ -130,7 +145,7 @@ pub fn parse_monitor_answer(params: &serde_json::Value) -> Vec<(IpAddr, String)>
                 .map(strip_dot)
                 .unwrap_or_default()
         });
-        if !name.is_empty() {
+        if is_acceptable_hostname(&name) {
             out.push((ip, name));
         }
     }
@@ -189,6 +204,12 @@ fn monitor_loop(cache: Arc<Mutex<HostCache>>) {
             Err(_) => break,
         };
         buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > MAX_MONITOR_BUF {
+            eprintln!(
+                "caudalghostd: marco del monitor de resolved excede {MAX_MONITOR_BUF} bytes sin NUL; resolver inerte"
+            );
+            return;
+        }
         // Mensajes varlink: JSON terminados en NUL.
         while let Some(pos) = buf.iter().position(|&b| b == 0) {
             let msg: Vec<u8> = buf.drain(..=pos).collect();
@@ -272,6 +293,30 @@ mod tests {
         assert!(out.iter().all(|(_, name)| name == "example.com"));
         assert!(out.iter().any(|(ip, _)| ip.to_string() == "93.184.215.14"));
         assert!(out.iter().any(|(ip, _)| ip.to_string() == "2606:2800::1"));
+    }
+
+    #[test]
+    fn hostname_aceptable_rechaza_vacio_largo_y_control() {
+        assert!(is_acceptable_hostname("example.com"));
+        assert!(!is_acceptable_hostname(""));
+        assert!(is_acceptable_hostname(&"a".repeat(MAX_HOSTNAME_LEN)));
+        assert!(!is_acceptable_hostname(&"a".repeat(MAX_HOSTNAME_LEN + 1)));
+        assert!(!is_acceptable_hostname("evil\nhost"));
+        assert!(!is_acceptable_hostname("x\x1by"));
+    }
+
+    #[test]
+    fn parse_descarta_hostname_larguisimo() {
+        let largo = "a".repeat(10_000);
+        let json = format!(
+            r#"{{"question":[{{"class":1,"type":1,"name":"{largo}"}}],
+                 "answer":[{{"rr":{{"key":{{"class":1,"type":1,"name":"{largo}."}},"address":[1,2,3,4]}},"raw":"x"}}]}}"#
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parse_monitor_answer(&v).is_empty(),
+            "un hostname descomunal debe descartarse"
+        );
     }
 
     #[test]
