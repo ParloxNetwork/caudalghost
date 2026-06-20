@@ -64,22 +64,23 @@ fn read_request_line(
 
 /// Limita conexiones concurrentes. `try_acquire` entrega un guard que libera el
 /// slot al soltarse (`Drop`); si no quedan slots, devuelve `None`.
-pub struct ConnLimiter {
+struct ConnLimiter {
     active: Arc<AtomicUsize>,
     max: usize,
 }
 
 /// Guard de una conexión admitida: decrementa el contador al soltarse.
-pub struct ConnGuard(Arc<AtomicUsize>);
+struct ConnGuard(Arc<AtomicUsize>);
 
 impl Drop for ConnGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        // Relaxed basta: el contador no publica/consume otros datos, solo cuenta.
+        self.0.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
 impl ConnLimiter {
-    pub fn new(max: usize) -> Self {
+    fn new(max: usize) -> Self {
         Self {
             active: Arc::new(AtomicUsize::new(0)),
             max: max.max(1),
@@ -87,12 +88,12 @@ impl ConnLimiter {
     }
 
     /// Reserva un slot si hay sitio. `None` si ya hay `max` conexiones activas.
-    pub fn try_acquire(&self) -> Option<ConnGuard> {
+    fn try_acquire(&self) -> Option<ConnGuard> {
         // Incremento optimista; si supera el tope, se revierte. Evita una ventana
-        // de carrera entre comprobar y reservar.
-        let prev = self.active.fetch_add(1, Ordering::AcqRel);
+        // de carrera entre comprobar y reservar. Relaxed: contador autocontenido.
+        let prev = self.active.fetch_add(1, Ordering::Relaxed);
         if prev >= self.max {
-            self.active.fetch_sub(1, Ordering::AcqRel);
+            self.active.fetch_sub(1, Ordering::Relaxed);
             None
         } else {
             Some(ConnGuard(self.active.clone()))
@@ -101,7 +102,7 @@ impl ConnLimiter {
 
     #[cfg(test)]
     fn active(&self) -> usize {
-        self.active.load(Ordering::Acquire)
+        self.active.load(Ordering::Relaxed)
     }
 }
 

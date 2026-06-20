@@ -235,15 +235,18 @@ pub fn insert_minute_app_remote(
     txn.commit()
 }
 
+/// Tope de filas del top de remotos: acota el tamaño de la respuesta IPC. La
+/// consulta ya ordena por tráfico DESC, así que es un top-N legítimo. OJO: en la
+/// query GLOBAL (`app=None`) se agrupa por `remote` sobre TODAS las apps, de modo
+/// que el nº de remotos distintos puede llegar a (nº apps × tope de ingest=50);
+/// 500 cubre con holgura un escritorio realista (~10 apps) sin truncar hosts
+/// reales. Para una sola app el set está acotado a ~51 por el ingest (≪ 500).
+const TOP_REMOTES_LIMIT: usize = 500;
+
 /// Top de hosts remotos en [start, end). `app=None` → global (todas las apps);
 /// `app=Some(x)` → solo esa app. Mismas 3 ramas por capa que `query_total`,
 /// agrupando por `remote` y ordenando por tráfico desc. Retención remoto
 /// desacoplada (minuto 7 d, hora 90 d) vía `REMOTE_*_RETENTION_SECS`.
-/// Tope de filas del top de remotos. La consulta ya ordena por tráfico DESC, así
-/// que es un top-N legítimo; acota el tamaño de la respuesta IPC para rangos
-/// antiguos con muchos hosts distintos.
-const TOP_REMOTES_LIMIT: usize = 200;
-
 pub fn query_top_remotes(
     conn: &Connection,
     start: i64,
@@ -676,12 +679,13 @@ mod tests {
     fn top_remotes_acota_el_numero_de_filas() {
         let conn = mem();
         let now = 1000i64;
-        // 300 remotos distintos en el minuto en curso → más que el tope.
+        // Más remotos distintos que el tope, en el minuto en curso.
+        let n = TOP_REMOTES_LIMIT + 100;
         let mut batch = String::new();
-        for i in 0..300 {
+        for i in 0..n {
             batch.push_str(&format!(
                 "INSERT INTO minute_app_remote VALUES ({now},'firefox','host{i}.example',{},0);\n",
-                300 - i
+                n - i
             ));
         }
         conn.execute_batch(&batch).unwrap();
@@ -689,7 +693,34 @@ mod tests {
         assert_eq!(
             rows.len(),
             TOP_REMOTES_LIMIT,
-            "con 300 hosts y tope {TOP_REMOTES_LIMIT}, deben volver {TOP_REMOTES_LIMIT}"
+            "con {} hosts y tope {TOP_REMOTES_LIMIT}, deben volver {TOP_REMOTES_LIMIT}",
+            TOP_REMOTES_LIMIT + 100
+        );
+    }
+
+    #[test]
+    fn top_remotes_global_no_trunca_hosts_de_multiples_apps() {
+        // Regresión R-01: la query global (app=None) agrupa por remote sobre TODAS
+        // las apps, así que el nº de remotos distintos puede ser (nº apps × ingest).
+        // 6 apps × 40 remotos únicos = 240 distintos < tope → no deben truncarse.
+        let conn = mem();
+        let now = 1000i64;
+        let mut batch = String::new();
+        let mut peso = 10_000;
+        for app in 0..6 {
+            for h in 0..40 {
+                peso -= 1;
+                batch.push_str(&format!(
+                    "INSERT INTO minute_app_remote VALUES ({now},'app{app}','a{app}-h{h}.example',{peso},0);\n"
+                ));
+            }
+        }
+        conn.execute_batch(&batch).unwrap();
+        let rows = query_top_remotes(&conn, 0, now + 1, None, now).unwrap();
+        assert_eq!(
+            rows.len(),
+            240,
+            "240 hosts globales distintos no deben truncarse (tope {TOP_REMOTES_LIMIT})"
         );
     }
 

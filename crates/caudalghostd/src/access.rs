@@ -45,15 +45,22 @@ pub const ENV_ACL_ACTIVE: &str = "CAUDALGHOST_ACL_ACTIVE_USERS";
 /// funciona» sin re-login. Se puede **desactivar** (ej.: edición **servidor**
 /// multiusuario, donde cada login SSH crea sesión logind y vería los flujos de
 /// todo el host) vía el flag `--no-acl-active-users` o `CAUDALGHOST_ACL_ACTIVE_USERS`
-/// = `0`/`false`/`no`/`off`. Desactivado, el acceso queda **solo por el grupo
-/// `caudalghost`**, que el administrador concede explícitamente.
+/// con un valor *falsy* (`0`/`false`/`no`/`off`/vacío, sin distinguir mayúsculas
+/// ni espacios). Desactivado, el acceso queda **solo por el grupo `caudalghost`**,
+/// que el administrador concede explícitamente.
 pub fn grant_active_users(cli_no_grant: bool, env_val: Option<&str>) -> bool {
     if cli_no_grant {
         return false; // el flag CLI manda sobre el entorno
     }
     match env_val {
-        Some(v) => !matches!(v.trim(), "0" | "false" | "no" | "off"),
-        None => true, // default: conceder (preserva escritorio)
+        // Desactiva con un token falsy (case-insensitive, recortando espacios).
+        // El vacío también desactiva: quien fija la var explícitamente busca
+        // cambiar el default, y el único cambio posible es desactivar.
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        ),
+        None => true, // default (var ausente): conceder (preserva escritorio)
     }
 }
 
@@ -114,15 +121,16 @@ mod tests {
         // Flag CLI --no-acl-active-users: desactiva (prioridad máxima).
         assert!(!grant_active_users(true, None));
         assert!(!grant_active_users(true, Some("1"))); // el flag manda sobre env
-                                                       // Env con valores "falsy" desactiva.
-        for v in ["0", "false", "no", "off", " off "] {
+                                                       // Falsy desactiva: case-insensitive, con espacios, y vacío incluido
+                                                       // (quien fija la var explícitamente busca cambiar el default).
+        for v in ["0", "false", "no", "off", " OFF ", "False", "", "  "] {
             assert!(
                 !grant_active_users(false, Some(v)),
                 "env={v:?} debe desactivar"
             );
         }
-        // Cualquier otro valor de env mantiene el default (conceder).
-        for v in ["1", "true", "yes", "", "loquesea"] {
+        // Truthy / no reconocido → conceder (default).
+        for v in ["1", "true", "yes", "loquesea"] {
             assert!(
                 grant_active_users(false, Some(v)),
                 "env={v:?} debe conceder"
