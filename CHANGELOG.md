@@ -23,8 +23,12 @@ Nada remotamente explotable. Detalle completo en `_local/plans/2026-06-20-securi
   con sesión logind (UID≥1000). En un servidor, cada login SSH crea sesión → cualquier usuario podía leer los
   flujos de red de **toda la máquina** (`access.rs`, CWE-284/200).
   *Arreglado:* palanca de política `grant_active_users` (flag `--no-acl-active-users` o
-  `CAUDALGHOST_ACL_ACTIVE_USERS=0`); **el default preserva el comportamiento de escritorio** («instalar→abrir→
-  funciona»). Desactivada, el socket queda solo bajo el grupo `caudalghost`. (commits `a48d8a3`, `e58be07`)
+  `CAUDALGHOST_ACL_ACTIVE_USERS=0`); **el escritorio preserva el comportamiento por defecto** («instalar→abrir→
+  funciona») y **la edición SERVIDOR arranca restringida**: su `.deb` instala un drop-in
+  (`…/caudalghostd.service.d/10-acl-off.conf`) con `CAUDALGHOST_ACL_ACTIVE_USERS=0`, de modo que el socket solo
+  lo concede el grupo `caudalghost`. Permitir acceso a todos los usuarios con sesión es un paso **intencional**
+  (`sudo systemctl edit caudalghostd` → `Environment=CAUDALGHOST_ACL_ACTIVE_USERS=1`), y el daemon **avisa en el
+  log** cada vez que arranca con el acceso por-UID activado. (commits `a48d8a3`, `e58be07`, + drop-in del server)
 
 #### Media
 
@@ -79,7 +83,9 @@ necesario por la hidratación inline de SvelteKit). (commits `e58be07`, `4dade72
 ### Pendiente antes de publicar 0.3.0
 
 - **Smoke-test visual de la GUI**: confirmar que la CSP nueva no rompe el render (no verificable headless).
-- **Política del `.deb` servidor**: decidir si la edición server arranca con el gate de acceso OFF (H-1).
+- ~~Política del `.deb` servidor~~ → **resuelto**: server arranca OFF (solo grupo); ON es opt-in intencional
+  vía `systemctl edit` y el daemon lo avisa en el log.
+- Antes del release: subir versión en `Cargo.toml`, reempacar **ambas** `.deb` (`scripts/build-debs.sh`), firmar y push.
 
 ### Rollback
 

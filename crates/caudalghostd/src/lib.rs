@@ -109,7 +109,15 @@ pub fn run(opts: Opts) -> anyhow::Result<()> {
         opts.no_acl_active_users,
         std::env::var(access::ENV_ACL_ACTIVE).ok().as_deref(),
     );
-    if !grant_active {
+    if grant_active {
+        // Transparencia/aviso: en servidor multiusuario esto expone la telemetría
+        // a cualquier usuario con sesión; el log apunta al interruptor para apagarlo.
+        eprintln!(
+            "caudalghostd: acceso por-UID ACTIVADO — los usuarios con sesión iniciada en esta \
+             máquina pueden consultar la telemetría de red de todo el host. En servidores \
+             multiusuario desactívalo con CAUDALGHOST_ACL_ACTIVE_USERS=0."
+        );
+    } else {
         eprintln!(
             "caudalghostd: acceso por-UID desactivado; el socket solo lo concede el grupo caudalghost."
         );
