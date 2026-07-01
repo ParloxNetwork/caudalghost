@@ -2,6 +2,17 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.5.0] — 2026-07-01
+
+### Vista En vivo (GUI)
+
+- **Gráfico fluido:** el caudal en vivo se desplaza suave (~60 FPS) en vez de saltar de segundo en segundo —
+  el eje de tiempo se mueve continuo con `requestAnimationFrame`, con valores reales (sin interpolar). Se congela
+  al pausar o si el daemon calla; respeta `prefers-reduced-motion`.
+- **Rótulos del eje relativos al ahora:** en vez de segundos sueltos (`:05 :10…`), el borde derecho es "ahora" y
+  hacia la izquierda "15s", "30s", "45s", "1 min".
+- **Versión en el footer:** se muestra `vX.Y.Z |` antes de "Hecho con ❤ por Parlox Network".
+
 ## [0.4.0] — 2026-07-01
 
 ### Vista Histórico (GUI)
