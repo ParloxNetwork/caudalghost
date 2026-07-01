@@ -2,6 +2,19 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.4.0] — 2026-07-01
+
+### Vista Histórico (GUI)
+
+- **Rótulos del eje X con contexto de fecha:** eje de dos niveles (hora/día arriba, fecha/mes/año agrupado
+  abajo), adaptativo al rango. Se acabaron los muros de horas sin saber de qué día son (7 días, 24 h, 5 min).
+- **Tooltip contenido:** ya no se sale de la ventana en el primer/último punto (clamp + flip); su texto de
+  fecha/hora se alinea con el eje.
+- **Vista "ayer" arreglada:** al cambiar de rango ya no se queda pintado el rango anterior (se limpia el estado
+  antes de cargar).
+- **Selector de fechas con rango:** además del día suelto, un toggle "Rango" permite elegir Desde–Hasta (Hasta
+  inclusivo). Token nuevo `rango:YYYY-MM-DD:YYYY-MM-DD` en el backend.
+
 ## [0.3.0] — 2026-06-20
 
 ### Seguridad / Hardening
