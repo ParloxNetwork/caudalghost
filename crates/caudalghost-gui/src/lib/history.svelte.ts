@@ -16,6 +16,7 @@ export const RANGES = [
 export const history = $state({
   range: '7d', loading: false, error: '',
   series: [] as SeriePoint[], total: [] as TotalRow[], apps: [] as AppRow[], hosts: [] as RemoteRow[],
+  start: 0, end: 0,
 });
 
 let reqId = 0;
@@ -24,9 +25,10 @@ export async function loadHistory(range: string) {
   history.range = range; history.loading = true; history.error = '';
   resetHistory(history); // no dejar el rango anterior pintándose mientras llega el nuevo
   try {
-    const d = await invoke<{ series: SeriePoint[]; total: TotalRow[]; apps: AppRow[]; hosts: RemoteRow[] }>('history', { rango: range });
+    const d = await invoke<{ series: SeriePoint[]; total: TotalRow[]; apps: AppRow[]; hosts: RemoteRow[]; start: number; end: number }>('history', { rango: range });
     if (id !== reqId) return; // una petición más nueva ya está en curso
     history.series = d.series; history.total = d.total; history.apps = d.apps; history.hosts = d.hosts ?? [];
+    history.start = d.start; history.end = d.end;
   } catch (e) {
     if (id !== reqId) return;
     history.error = String(e); history.series = []; history.total = []; history.apps = []; history.hosts = [];

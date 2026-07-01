@@ -86,6 +86,8 @@ struct HistoryData {
     total: Vec<caudalghost_core::proto::TotalRow>,
     apps: Vec<caudalghost_core::proto::AppRow>,
     hosts: Vec<caudalghost_core::proto::RemoteRow>,
+    start: i64,
+    end: i64,
 }
 
 #[tauri::command]
@@ -117,6 +119,8 @@ fn history(rango: String) -> Result<HistoryData, String> {
         total,
         apps,
         hosts,
+        start,
+        end,
     })
 }
 

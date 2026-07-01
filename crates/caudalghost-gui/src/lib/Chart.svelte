@@ -6,8 +6,8 @@
   import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints } from './axis-time';
   import { clampTooltip } from './chart-geom';
 
-  let { ts, rx, tx, units, interactive = false }:
-    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean } = $props();
+  let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined }:
+    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean; xmin?: number; xmax?: number } = $props();
   let wrapEl: HTMLDivElement;
   let el: HTMLDivElement;
   let tipEl: HTMLDivElement;
@@ -120,8 +120,11 @@
 
   // datos: actualiza sin recrear (setData resetea el zoom al cambiar de rango, lo cual es deseable).
   $effect(() => {
-    void ts; void rx; void tx;
-    plot?.setData(makeData());
+    void ts; void rx; void tx; void xmin; void xmax;
+    if (!plot) return;
+    const pinned = interactive && xmin != null && xmax != null && xmax > xmin;
+    plot.setData(makeData(), !pinned); // pinned: no auto-rescale; we set x below
+    if (pinned) plot.setScale('x', { min: xmin as number, max: xmax as number });
   });
 </script>
 

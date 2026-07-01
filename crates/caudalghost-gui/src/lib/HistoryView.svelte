@@ -33,7 +33,7 @@
   {#if history.series.length === 0 && !history.loading && !history.error}
     <p class="empty">Aún no hay caudal registrado en este rango. En cuanto fluya algo, quedará aquí para siempre.</p>
   {:else}
-    <Chart {ts} {rx} {tx} units={live.units} interactive />
+    <Chart {ts} {rx} {tx} units={live.units} xmin={history.start} xmax={history.end} interactive />
   {/if}
   <HistoryBreakdown />
   <HostsBreakdown />
