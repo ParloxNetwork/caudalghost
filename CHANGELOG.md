@@ -2,7 +2,7 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
-## [0.3.0] — sin publicar (rama `security/0.3.0-hardening`)
+## [0.3.0] — 2026-06-20
 
 ### Seguridad / Hardening
 
@@ -81,14 +81,14 @@ necesario por la hidratación inline de SvelteKit). (commits `e58be07`, `4dade72
 178 resultados de test verdes · `cargo clippy --all-targets` limpio · `cargo fmt --check` limpio ·
 `cargo build --release` OK · `scripts/test-postinst.sh` 5/5 · `svelte-check` 0 errores + `vite build` OK.
 
-### Pendiente antes de publicar 0.3.0
+### Estado del release
 
-- ~~Smoke-test visual de la GUI~~ → **hecho**: build de producción verificada visualmente, la CSP no rompe el render.
-- ~~Política del `.deb` servidor~~ → **resuelto**: server arranca OFF (solo grupo); ON es opt-in intencional
-  vía `systemctl edit` y el daemon lo avisa en el log.
-- **Release (mecánico, cuando decidas):** subir versión en `Cargo.toml`, reempacar **ambas** `.deb`
-  (`scripts/build-debs.sh`), firmar y push; aplicar el borrador de docs del repo web
-  (`px-caudalghost-web/_local/plans/2026-06-20-docs-acceso-servidor-0.3.0.md`).
+Publicado el 2026-06-20: versión `0.3.0` en `Cargo.toml`, tag firmado `v0.3.0`, **ambas** `.deb`
+reempacadas (`scripts/build-debs.sh`) e instaladas en escritorio y servidor. Smoke-test visual de la GUI
+(CSP) verificado; política del `.deb` servidor resuelta (arranca con el acceso por-UID OFF; ON es opt-in
+avisado en el log).
+
+Residual: **push** a un remoto cuando exista (hoy el repositorio es solo local).
 
 ### Rollback
 
