@@ -44,7 +44,7 @@
   button.cal.on { color: var(--cg-on-accent); }
   button:disabled { opacity: 0.4; cursor: default; }
   .sep { width: 1px; height: 16px; background: var(--cg-border); margin: 0 3px; }
-  .picker { display: flex; align-items: center; gap: 5px; }
+  .picker { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; }
   .toggle { display: flex; gap: 2px; }
   .toggle button { padding: 3px 8px; }
   .dash { color: var(--cg-text-tertiary); }
