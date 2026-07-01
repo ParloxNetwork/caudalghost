@@ -1,6 +1,20 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Tope de longitud (en chars) de una etiqueta de aplicación. Un proceso local
+/// puede fijar su `comm` o disponer su cgroup con bytes arbitrarios; la etiqueta
+/// se guarda en SQLite y se pinta en la TUI/GUI, así que la acotamos y saneamos.
+const MAX_APP_LABEL: usize = 128;
+
+/// Sanea una etiqueta de app: elimina caracteres de control y recorta a
+/// `MAX_APP_LABEL` chars. Evita bloat de BD e inyección de control en la UI.
+fn sanitize_label(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_APP_LABEL)
+        .collect()
+}
+
 /// Extrae el identificador de aplicación de una línea de cgroup v2 (`0::/...`).
 /// Reconoce scopes de escritorio (app-*.scope), Flatpak, Snap y services.
 pub fn app_from_cgroup(line: &str) -> Option<String> {
@@ -63,14 +77,14 @@ pub fn resolve_app(proc_root: &Path, tgid: u32) -> String {
     if let Ok(cg) = std::fs::read_to_string(base.join("cgroup")) {
         for line in cg.lines() {
             if let Some(app) = app_from_cgroup(line) {
-                return app;
+                return sanitize_label(&app);
             }
         }
     }
     if let Ok(comm) = std::fs::read_to_string(base.join("comm")) {
         let c = comm.trim();
         if !c.is_empty() {
-            return c.to_string();
+            return sanitize_label(c);
         }
     }
     "(desconocido)".to_string()
@@ -99,6 +113,42 @@ impl AppCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_label_quita_control_chars_y_recorta() {
+        // Limpio se mantiene.
+        assert_eq!(sanitize_label("firefox"), "firefox");
+        // Control chars (ESC, newline, NUL) eliminados; el resto se conserva.
+        assert_eq!(sanitize_label("fire\x1b[31mfox\n"), "fire[31mfox");
+        assert_eq!(sanitize_label("ab\0cd"), "abcd");
+        // Tope de longitud.
+        let largo = "a".repeat(500);
+        assert_eq!(sanitize_label(&largo).chars().count(), MAX_APP_LABEL);
+    }
+
+    #[test]
+    fn resolve_app_recorta_etiqueta_larguisima_de_cgroup() {
+        let largo = "a".repeat(300);
+        let cg = format!("0::/user.slice/app.slice/app-{largo}.scope");
+        let d = fake_proc(30, Some(&cg), None);
+        let got = resolve_app(d.path(), 30);
+        assert!(
+            got.chars().count() <= MAX_APP_LABEL,
+            "etiqueta sin recortar: {} chars",
+            got.chars().count()
+        );
+    }
+
+    #[test]
+    fn resolve_app_sanea_comm_con_control_chars() {
+        // comm con un newline incrustado (un proceso puede fijar su comm).
+        let d = fake_proc(31, None, Some("evil\x1bhack"));
+        let got = resolve_app(d.path(), 31);
+        assert!(
+            !got.chars().any(|c| c.is_control()),
+            "quedó un control char: {got:?}"
+        );
+    }
 
     #[test]
     fn parsea_scopes_de_escritorio() {

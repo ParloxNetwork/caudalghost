@@ -42,6 +42,13 @@ pub struct Opts {
     /// Desactiva eBPF (modo solo-interfaz)
     #[arg(long)]
     pub no_ebpf: bool,
+    /// No conceder acceso al socket por UID a los usuarios con sesión activa;
+    /// el socket queda solo bajo el grupo `caudalghost` (que el admin concede).
+    /// Recomendado en la edición SERVIDOR multiusuario para no exponer los flujos
+    /// de toda la máquina a cualquier usuario logueado. También: env
+    /// `CAUDALGHOST_ACL_ACTIVE_USERS=0`. Default: conceder (flujo de escritorio).
+    #[arg(long)]
+    pub no_acl_active_users: bool,
 }
 
 pub fn run(opts: Opts) -> anyhow::Result<()> {
@@ -95,8 +102,33 @@ pub fn run(opts: Opts) -> anyhow::Result<()> {
     let listener = api::bind(&socket_path)?;
     // Acceso sin re-login (D11): concede el socket a los usuarios logueados por
     // UID. Si no hay logind o falla el ACL, se degrada al grupo (no aborta).
+    // Política configurable (H-1): por defecto se conceden los UIDs activos
+    // (escritorio); con --no-acl-active-users / CAUDALGHOST_ACL_ACTIVE_USERS=0
+    // no se concede a nadie por UID (acceso solo por grupo) — para servidor.
+    let grant_active = access::grant_active_users(
+        opts.no_acl_active_users,
+        std::env::var(access::ENV_ACL_ACTIVE).ok().as_deref(),
+    );
+    if grant_active {
+        // Transparencia/aviso: en servidor multiusuario esto expone la telemetría
+        // a cualquier usuario con sesión; el log apunta al interruptor para apagarlo.
+        eprintln!(
+            "caudalghostd: acceso por-UID ACTIVADO — los usuarios con sesión iniciada en esta \
+             máquina pueden consultar la telemetría de red de todo el host. En servidores \
+             multiusuario desactívalo con CAUDALGHOST_ACL_ACTIVE_USERS=0."
+        );
+    } else {
+        eprintln!(
+            "caudalghostd: acceso por-UID desactivado; el socket solo lo concede el grupo caudalghost."
+        );
+    }
     let mut acl_failing = false;
-    if let Err(e) = access::sync_socket_acl(&socket_path, &access::active_user_uids()) {
+    let startup_uids = if grant_active {
+        access::active_user_uids()
+    } else {
+        Vec::new()
+    };
+    if let Err(e) = access::sync_socket_acl(&socket_path, &startup_uids) {
         eprintln!("caudalghostd: ACL del socket no aplicado ({e}); se usa el grupo caudalghost.");
         acl_failing = true;
     }
@@ -183,7 +215,12 @@ pub fn run(opts: Opts) -> anyhow::Result<()> {
         }
         // Refresco del ACL: capta logins/logouts sin reiniciar el daemon.
         if last_acl.elapsed() >= acl_every {
-            match access::sync_socket_acl(&socket_path, &access::active_user_uids()) {
+            let uids = if grant_active {
+                access::active_user_uids()
+            } else {
+                Vec::new()
+            };
+            match access::sync_socket_acl(&socket_path, &uids) {
                 Ok(()) => acl_failing = false,
                 Err(e) => {
                     if !acl_failing {

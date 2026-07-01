@@ -235,6 +235,14 @@ pub fn insert_minute_app_remote(
     txn.commit()
 }
 
+/// Tope de filas del top de remotos: acota el tamaño de la respuesta IPC. La
+/// consulta ya ordena por tráfico DESC, así que es un top-N legítimo. OJO: en la
+/// query GLOBAL (`app=None`) se agrupa por `remote` sobre TODAS las apps, de modo
+/// que el nº de remotos distintos puede llegar a (nº apps × tope de ingest=50);
+/// 500 cubre con holgura un escritorio realista (~10 apps) sin truncar hosts
+/// reales. Para una sola app el set está acotado a ~51 por el ingest (≪ 500).
+const TOP_REMOTES_LIMIT: usize = 500;
+
 /// Top de hosts remotos en [start, end). `app=None` → global (todas las apps);
 /// `app=Some(x)` → solo esa app. Mismas 3 ramas por capa que `query_total`,
 /// agrupando por `remote` y ordenando por tráfico desc. Retención remoto
@@ -276,7 +284,8 @@ pub fn query_top_remotes(
         )
     };
     let sql = format!(
-        "SELECT remote, SUM(rx), SUM(tx) FROM ({body}) GROUP BY remote ORDER BY SUM(rx)+SUM(tx) DESC"
+        "SELECT remote, SUM(rx), SUM(tx) FROM ({body}) GROUP BY remote \
+         ORDER BY SUM(rx)+SUM(tx) DESC LIMIT {TOP_REMOTES_LIMIT}"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let map = |r: &rusqlite::Row| {
@@ -601,15 +610,26 @@ mod tests {
         // El total se preserva: (otros) = preexistente(1000,100) + cola c.com(10,1).
         assert_eq!((otros[0].2, otros[0].3), (1010, 101));
         // Los top-2 reales se conservan intactos.
-        assert!(out.iter().any(|(_, r, rx, tx)| r == "a.com" && *rx == 100 && *tx == 10));
-        assert!(out.iter().any(|(_, r, rx, tx)| r == "b.com" && *rx == 50 && *tx == 5));
+        assert!(out
+            .iter()
+            .any(|(_, r, rx, tx)| r == "a.com" && *rx == 100 && *tx == 10));
+        assert!(out
+            .iter()
+            .any(|(_, r, rx, tx)| r == "b.com" && *rx == 50 && *tx == 5));
 
         // Sin claves (app, remote) duplicadas: la salida es insertable sin colisión.
-        let mut keys: Vec<_> = out.iter().map(|(a, r, _, _)| (a.clone(), r.clone())).collect();
+        let mut keys: Vec<_> = out
+            .iter()
+            .map(|(a, r, _, _)| (a.clone(), r.clone()))
+            .collect();
         let n = keys.len();
         keys.sort();
         keys.dedup();
-        assert_eq!(keys.len(), n, "no debe haber claves (app, remote) duplicadas");
+        assert_eq!(
+            keys.len(),
+            n,
+            "no debe haber claves (app, remote) duplicadas"
+        );
     }
 
     /// `apply_top_n` debe ser idempotente: reaplicarla sobre su propia salida no
@@ -653,6 +673,55 @@ mod tests {
         assert!(f.iter().any(|(h, rx, _)| h == "github.com" && *rx == 100));
         assert!(f.iter().any(|(h, rx, _)| h == "fastly.net" && *rx == 7));
         assert!(f.iter().all(|(h, _, _)| h != "scdn.co"));
+    }
+
+    #[test]
+    fn top_remotes_acota_el_numero_de_filas() {
+        let conn = mem();
+        let now = 1000i64;
+        // Más remotos distintos que el tope, en el minuto en curso.
+        let n = TOP_REMOTES_LIMIT + 100;
+        let mut batch = String::new();
+        for i in 0..n {
+            batch.push_str(&format!(
+                "INSERT INTO minute_app_remote VALUES ({now},'firefox','host{i}.example',{},0);\n",
+                n - i
+            ));
+        }
+        conn.execute_batch(&batch).unwrap();
+        let rows = query_top_remotes(&conn, 0, now + 1, None, now).unwrap();
+        assert_eq!(
+            rows.len(),
+            TOP_REMOTES_LIMIT,
+            "con {} hosts y tope {TOP_REMOTES_LIMIT}, deben volver {TOP_REMOTES_LIMIT}",
+            TOP_REMOTES_LIMIT + 100
+        );
+    }
+
+    #[test]
+    fn top_remotes_global_no_trunca_hosts_de_multiples_apps() {
+        // Regresión R-01: la query global (app=None) agrupa por remote sobre TODAS
+        // las apps, así que el nº de remotos distintos puede ser (nº apps × ingest).
+        // 6 apps × 40 remotos únicos = 240 distintos < tope → no deben truncarse.
+        let conn = mem();
+        let now = 1000i64;
+        let mut batch = String::new();
+        let mut peso = 10_000;
+        for app in 0..6 {
+            for h in 0..40 {
+                peso -= 1;
+                batch.push_str(&format!(
+                    "INSERT INTO minute_app_remote VALUES ({now},'app{app}','a{app}-h{h}.example',{peso},0);\n"
+                ));
+            }
+        }
+        conn.execute_batch(&batch).unwrap();
+        let rows = query_top_remotes(&conn, 0, now + 1, None, now).unwrap();
+        assert_eq!(
+            rows.len(),
+            240,
+            "240 hosts globales distintos no deben truncarse (tope {TOP_REMOTES_LIMIT})"
+        );
     }
 
     #[test]

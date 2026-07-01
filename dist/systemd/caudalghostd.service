@@ -27,6 +27,13 @@ AmbientCapabilities=CAP_BPF CAP_PERFMON
 CapabilityBoundingSet=CAP_BPF CAP_PERFMON
 NoNewPrivileges=yes
 
+# Límites de recursos (cgroup v2) como control compensatorio del DoS local del
+# socket (H-2): aunque el daemon ya acota línea/conexiones en código, esto pone
+# un techo duro al blast-radius sin afectar a eBPF. TasksMax cubre con holgura el
+# tope de 128 conexiones concurrentes; MemoryMax es muy holgado para telemetría.
+TasksMax=256
+MemoryMax=256M
+
 # Directorios con dueño del servicio (resuelven la base root-owned y el socket).
 StateDirectory=caudalghost
 StateDirectoryMode=0750

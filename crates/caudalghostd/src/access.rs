@@ -36,6 +36,34 @@ pub fn active_user_uids() -> Vec<u32> {
     active_user_uids_in(Path::new("/run/systemd/users"), 1000)
 }
 
+/// Variable de entorno que controla la política de acceso al socket.
+pub const ENV_ACL_ACTIVE: &str = "CAUDALGHOST_ACL_ACTIVE_USERS";
+
+/// ¿Conceder ACL `rw` a los usuarios con sesión activa (UID≥1000)?
+///
+/// Default = `true`: preserva el flujo de **escritorio** D11 «instalar→abrir→
+/// funciona» sin re-login. Se puede **desactivar** (ej.: edición **servidor**
+/// multiusuario, donde cada login SSH crea sesión logind y vería los flujos de
+/// todo el host) vía el flag `--no-acl-active-users` o `CAUDALGHOST_ACL_ACTIVE_USERS`
+/// con un valor *falsy* (`0`/`false`/`no`/`off`/vacío, sin distinguir mayúsculas
+/// ni espacios). Desactivado, el acceso queda **solo por el grupo `caudalghost`**,
+/// que el administrador concede explícitamente.
+pub fn grant_active_users(cli_no_grant: bool, env_val: Option<&str>) -> bool {
+    if cli_no_grant {
+        return false; // el flag CLI manda sobre el entorno
+    }
+    match env_val {
+        // Desactiva con un token falsy (case-insensitive, recortando espacios).
+        // El vacío también desactiva: quien fija la var explícitamente busca
+        // cambiar el default, y el único cambio posible es desactivar.
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        ),
+        None => true, // default (var ausente): conceder (preserva escritorio)
+    }
+}
+
 /// Concede `u:<uid>:rw` a cada uid dado y retira las entradas de usuario que ya
 /// no estén; deja intacto el resto del ACL (owner/grupo/otros). Idempotente.
 pub fn sync_socket_acl(socket: &Path, uids: &[u32]) -> anyhow::Result<()> {
@@ -84,6 +112,30 @@ mod tests {
         assert_eq!(active_user_uids_in(dir.path(), 1000), vec![1000, 1001]);
         // Directorio inexistente → vacío (sin logind), no panic.
         assert!(active_user_uids_in(std::path::Path::new("/no/existe/x"), 1000).is_empty());
+    }
+
+    #[test]
+    fn politica_default_concede_y_el_flag_o_env_la_desactivan() {
+        // Default (sin flag, sin env): conceder → preserva escritorio.
+        assert!(grant_active_users(false, None));
+        // Flag CLI --no-acl-active-users: desactiva (prioridad máxima).
+        assert!(!grant_active_users(true, None));
+        assert!(!grant_active_users(true, Some("1"))); // el flag manda sobre env
+                                                       // Falsy desactiva: case-insensitive, con espacios, y vacío incluido
+                                                       // (quien fija la var explícitamente busca cambiar el default).
+        for v in ["0", "false", "no", "off", " OFF ", "False", "", "  "] {
+            assert!(
+                !grant_active_users(false, Some(v)),
+                "env={v:?} debe desactivar"
+            );
+        }
+        // Truthy / no reconocido → conceder (default).
+        for v in ["1", "true", "yes", "loquesea"] {
+            assert!(
+                grant_active_users(false, Some(v)),
+                "env={v:?} debe conceder"
+            );
+        }
     }
 
     #[test]

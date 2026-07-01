@@ -172,7 +172,10 @@ mod tests {
         let mut d = Daemon::new(conn, ring.clone());
         // Cruza frontera de minuto en el primer tick → dispara maintain (que peta).
         let r = d.tick(vec![c("eth0", 1000, 100)], 60);
-        assert!(r.is_ok(), "tick debe degradar, no propagar el error de maintain");
+        assert!(
+            r.is_ok(),
+            "tick debe degradar, no propagar el error de maintain"
+        );
         // La vista en vivo sigue recibiendo muestras pese al fallo de mantenimiento.
         assert_eq!(ring.lock().unwrap().last(10).len(), 1);
     }

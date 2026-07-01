@@ -88,4 +88,7 @@ assets = [
     ["../../dist/sysusers.d/caudalghost.conf", "usr/lib/sysusers.d/", "644"],
     ["../../dist/polkit/10-caudalghost-resolved.rules", "usr/share/polkit-1/rules.d/", "644"],
     ["../../dist/README.md", "usr/share/doc/caudalghost-server/README.md", "644"],
+    # Drop-in SOLO de la edición servidor: acceso al socket restringido al grupo
+    # por defecto (H-1). El escritorio NO lo lleva → conserva el acceso por-UID.
+    ["../../dist/systemd/server-acl-off.conf", "usr/lib/systemd/system/caudalghostd.service.d/10-acl-off.conf", "644"],
 ]
