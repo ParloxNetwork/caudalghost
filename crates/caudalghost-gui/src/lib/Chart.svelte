@@ -4,6 +4,7 @@
   import { untrack } from 'svelte';
   import { formatUnits, type UnitMode } from './format';
   import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints } from './axis-time';
+  import { clampTooltip } from './chart-geom';
 
   let { ts, rx, tx, units, interactive = false }:
     { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean } = $props();
@@ -75,8 +76,12 @@
             const o = u.over.getBoundingClientRect();
             const wr = wrapEl.getBoundingClientRect();
             tipEl.style.display = 'flex';
-            tipEl.style.left = `${o.left - wr.left + left}px`;
-            tipEl.style.top = `${o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0)}px`;
+            const px = o.left - wr.left + left;
+            const py = o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0);
+            const { left: cx, flipY } = clampTooltip(px, py, tipEl.offsetWidth, tipEl.offsetHeight, o.width, o.height);
+            tipEl.style.left = `${cx}px`;
+            tipEl.style.top = `${py}px`;
+            tipEl.classList.toggle('below', flipY);
             // DOM seguro en vez de innerHTML: textContent escapa por construcción,
             // así ninguna salida de fmtTime/formatUnits puede interpretarse como HTML.
             const span = (cls: string, text: string): HTMLSpanElement => {
@@ -136,6 +141,7 @@
     padding: 4px 8px; font-family: var(--cg-font-mono); font-size: 10px; white-space: nowrap;
     box-shadow: 0 4px 14px #0008;
   }
+  .tip.below { transform: translate(-50%, 8px); }
   .tip :global(.tt) { color: var(--cg-text-secondary); }
   .tip :global(.tr) { color: var(--cg-rx); }
   .tip :global(.tx) { color: var(--cg-tx); }
