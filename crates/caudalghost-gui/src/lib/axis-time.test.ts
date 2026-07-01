@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { chooseTier, fmtFine, fmtCoarse, MONTHS_ES } from './axis-time';
-import { coarseUnit, coarseBuckets, coarseMidpoints } from './axis-time';
+import { coarseUnit, coarseBuckets, coarseMidpoints, fineAxisLabels } from './axis-time';
 
 const DAY = 86400;
 test('chooseTier por franjas de span', () => {
@@ -61,4 +61,28 @@ test('coarseMidpoints: 24h cruzando medianoche → 2 puntos, recortados a la ven
   // bucket 0: [30 12:00, 1 00:00) → medio 30 18:00 ; bucket 1: [1 00:00, 1 12:00) → medio 1 06:00
   expect(m[0]).toBe(new Date(2026, 5, 30, 18, 0).getTime() / 1000);
   expect(m[1]).toBe(new Date(2026, 6, 1, 6, 0).getTime() / 1000);
+});
+
+test('fineAxisLabels: dos ticks el mismo día en tier days → la segunda etiqueta se blanquea', () => {
+  const splits = [
+    new Date(2026, 5, 25, 0, 0).getTime() / 1000,
+    new Date(2026, 5, 25, 12, 0).getTime() / 1000,
+  ];
+  expect(fineAxisLabels(splits, 'days')).toEqual(['25', '']);
+});
+
+test('fineAxisLabels: días consecutivos distintos en tier days → ambas etiquetas se muestran', () => {
+  const splits = [
+    new Date(2026, 5, 25, 12, 0).getTime() / 1000,
+    new Date(2026, 5, 26, 0, 0).getTime() / 1000,
+  ];
+  expect(fineAxisLabels(splits, 'days')).toEqual(['25', '26']);
+});
+
+test('fineAxisLabels: tier intraday con horas distintas → ninguna se blanquea', () => {
+  const splits = [
+    new Date(2026, 5, 25, 10, 0).getTime() / 1000,
+    new Date(2026, 5, 25, 10, 30).getTime() / 1000,
+  ];
+  expect(fineAxisLabels(splits, 'intraday')).toEqual(['10:00', '10:30']);
 });

@@ -64,6 +64,17 @@ export function coarseBuckets(startSec: number, endSec: number, unit: 'day' | 'm
   return out;
 }
 
+/** Etiquetas del nivel fino, deduplicando repetidas consecutivas (una por día/mes/año). */
+export function fineAxisLabels(splits: number[], tier: Tier): string[] {
+  let prev = '';
+  return splits.map((s) => {
+    const label = fmtFine(s, tier);
+    if (label === prev) return '';
+    prev = label;
+    return label;
+  });
+}
+
 /** Punto medio (recortado a [min,max]) de cada bucket: dónde centrar la etiqueta de fecha. */
 export function coarseMidpoints(minSec: number, maxSec: number, tier: Tier): number[] {
   const unit = coarseUnit(tier);

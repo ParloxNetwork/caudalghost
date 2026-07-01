@@ -3,7 +3,7 @@
   import 'uplot/dist/uPlot.min.css';
   import { untrack } from 'svelte';
   import { formatUnits, type UnitMode } from './format';
-  import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints } from './axis-time';
+  import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints, fineAxisLabels } from './axis-time';
   import { clampTooltip } from './chart-geom';
 
   let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined }:
@@ -41,7 +41,7 @@
           incrs: [60, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000, 31536000],
           values: (u, splits) => {
             const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
-            return splits.map((v) => fmtFine(v as number, tier));
+            return fineAxisLabels(splits as number[], tier);
           } },
         // Eje Y (unidades).
         { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
