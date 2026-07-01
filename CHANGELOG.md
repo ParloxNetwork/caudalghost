@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.4.0] — 2026-07-01
+
+### Vista Histórico (GUI)
+
+- **Rótulos del eje X con contexto de fecha:** eje de dos niveles (hora/día arriba, fecha/mes/año agrupado
+  abajo), adaptativo al rango y con una sola etiqueta por día (sin números repetidos). Se acabaron los muros de
+  horas sin saber de qué día son (7 días, 24 h, 5 min).
+- **Eje anclado a la ventana pedida:** el gráfico se ancla a `[inicio, fin]` del rango en vez de auto-escalar a
+  la extensión de los datos. Arregla la vista **"ayer"** (con un solo punto ya no inventa un eje de varios años)
+  y **"24 h"** (cubre las 24 h completas hasta *ahora*). Además se limpia el estado al cambiar de rango.
+- **Tooltip contenido:** ya no se sale de la ventana en el primer/último punto (clamp + flip); su texto de
+  fecha/hora se alinea con el eje.
+- **Selector de fechas con rango:** además del día suelto, un toggle "Rango" permite elegir Desde–Hasta (Hasta
+  inclusivo; token `rango:YYYY-MM-DD:YYYY-MM-DD` en el backend). Ventana un poco más ancha para que el selector
+  no salte de fila.
+
 ## [0.3.0] — 2026-06-20
 
 ### Seguridad / Hardening

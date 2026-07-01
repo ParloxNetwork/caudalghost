@@ -7,9 +7,10 @@
   import { history, loadHistory, historyTotals, RANGES } from '$lib/history.svelte';
   import { live } from '$lib/live.svelte';
   import { formatUnits } from '$lib/format';
+  import { prettyRangeLabel } from '$lib/history-derive';
 
   const totals = $derived(historyTotals(history.total));
-  const rangeLabel = $derived(RANGES.find((r) => r.token === history.range)?.label ?? history.range);
+  const rangeLabel = $derived(prettyRangeLabel(history.range, RANGES));
   const ts = $derived(history.series.map((p) => p.ts));
   const rx = $derived(history.series.map((p) => p.rx));
   const tx = $derived(history.series.map((p) => p.tx));
@@ -32,7 +33,7 @@
   {#if history.series.length === 0 && !history.loading && !history.error}
     <p class="empty">Aún no hay caudal registrado en este rango. En cuanto fluya algo, quedará aquí para siempre.</p>
   {:else}
-    <Chart {ts} {rx} {tx} units={live.units} interactive />
+    <Chart {ts} {rx} {tx} units={live.units} xmin={history.start} xmax={history.end} interactive />
   {/if}
   <HistoryBreakdown />
   <HostsBreakdown />

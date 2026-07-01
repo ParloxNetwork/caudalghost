@@ -86,6 +86,8 @@ struct HistoryData {
     total: Vec<caudalghost_core::proto::TotalRow>,
     apps: Vec<caudalghost_core::proto::AppRow>,
     hosts: Vec<caudalghost_core::proto::RemoteRow>,
+    start: i64,
+    end: i64,
 }
 
 #[tauri::command]
@@ -107,7 +109,11 @@ fn history(rango: String) -> Result<HistoryData, String> {
         Response::Error { message } => return Err(message),
         _ => return Err("respuesta inesperada (apps)".into()),
     };
-    let hosts = match ipc::call(&Request::TopRemotes { start, end, app: None })? {
+    let hosts = match ipc::call(&Request::TopRemotes {
+        start,
+        end,
+        app: None,
+    })? {
         Response::TopRemotes { rows } => rows,
         Response::Error { message } => return Err(message),
         _ => return Err("respuesta inesperada (hosts)".into()),
@@ -117,6 +123,8 @@ fn history(rango: String) -> Result<HistoryData, String> {
         total,
         apps,
         hosts,
+        start,
+        end,
     })
 }
 

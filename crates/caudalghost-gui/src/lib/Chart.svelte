@@ -3,9 +3,11 @@
   import 'uplot/dist/uPlot.min.css';
   import { untrack } from 'svelte';
   import { formatUnits, type UnitMode } from './format';
+  import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints, fineAxisLabels } from './axis-time';
+  import { clampTooltip } from './chart-geom';
 
-  let { ts, rx, tx, units, interactive = false }:
-    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean } = $props();
+  let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined }:
+    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean; xmin?: number; xmax?: number } = $props();
   let wrapEl: HTMLDivElement;
   let el: HTMLDivElement;
   let tipEl: HTMLDivElement;
@@ -15,19 +17,43 @@
   function fmtTime(sec: number): string {
     const d = new Date(sec * 1000);
     const sp = spanSecs();
+    if (interactive) {
+      const tier = chooseTier(sp);
+      return tier === 'intraday' ? `${fmtCoarse(sec, tier)} ${fmtFine(sec, tier)}` : fmtCoarse(sec, tier);
+    }
     if (sp > 3 * 86400) return d.toLocaleDateString('es', { month: 'short', day: 'numeric' });
     if (sp > 2 * 3600) return d.toLocaleString('es', { day: 'numeric', hour: '2-digit', minute: '2-digit' });
     return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
   function makeOpts(w: number): uPlot.Options {
+    const h = interactive ? 240 : 220;
     return {
       width: w,
-      height: 220,
+      height: h,
       cursor: { y: false, drag: { x: interactive, y: false, setScale: interactive } },
       legend: { show: false },
       scales: { x: { time: true } },
-      axes: [
+      axes: interactive ? [
+        // Nivel fino (X, tiempo): reformatea cada tick con el tier del span visible.
+        // `incrs` de minuto-para-arriba: evita ticks sub-minuto que duplicarían "HH:MM" en la vista de 5 min.
+        { scale: 'x', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 28,
+          incrs: [60, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000, 31536000],
+          values: (u, splits) => {
+            const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
+            return fineAxisLabels(splits as number[], tier);
+          } },
+        // Eje Y (unidades).
+        { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+          values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
+        // Nivel grueso (X, fechas): etiquetas centradas bajo cada día/mes/año, sin grid ni ticks.
+        { scale: 'x', side: 2, stroke: '#5A7079', grid: { show: false }, ticks: { show: false }, size: 16, gap: 2,
+          splits: (u, _ai, min, max) => coarseMidpoints(min, max, chooseTier(max - min)),
+          values: (u, splits) => {
+            const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
+            return splits.map((v) => fmtCoarse(v as number, tier));
+          } },
+      ] : [
         { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 32 },
         { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
           values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
@@ -50,8 +76,12 @@
             const o = u.over.getBoundingClientRect();
             const wr = wrapEl.getBoundingClientRect();
             tipEl.style.display = 'flex';
-            tipEl.style.left = `${o.left - wr.left + left}px`;
-            tipEl.style.top = `${o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0)}px`;
+            const px = o.left - wr.left + left;
+            const py = o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0);
+            const { left: cx, flipY } = clampTooltip(px, py, tipEl.offsetWidth, tipEl.offsetHeight, o.width);
+            tipEl.style.left = `${cx}px`;
+            tipEl.style.top = `${py}px`;
+            tipEl.style.transform = flipY ? 'translate(-50%, 8px)' : 'translate(-50%, calc(-100% - 8px))';
             // DOM seguro en vez de innerHTML: textContent escapa por construcción,
             // así ninguna salida de fmtTime/formatUnits puede interpretarse como HTML.
             const span = (cls: string, text: string): HTMLSpanElement => {
@@ -82,15 +112,19 @@
     plot?.destroy();
     const p = new uPlot(makeOpts(el.clientWidth || 600), untrack(() => makeData()), el);
     plot = p;
-    const ro = new ResizeObserver(() => p.setSize({ width: el.clientWidth, height: 220 }));
+    const h = interactive ? 240 : 220;
+    const ro = new ResizeObserver(() => p.setSize({ width: el.clientWidth, height: h }));
     ro.observe(el);
     return () => { ro.disconnect(); p.destroy(); plot = undefined; if (tipEl) tipEl.style.display = 'none'; };
   });
 
   // datos: actualiza sin recrear (setData resetea el zoom al cambiar de rango, lo cual es deseable).
   $effect(() => {
-    void ts; void rx; void tx;
-    plot?.setData(makeData());
+    void ts; void rx; void tx; void xmin; void xmax;
+    if (!plot) return;
+    const pinned = interactive && xmin != null && xmax != null && xmax > xmin;
+    plot.setData(makeData(), !pinned); // pinned: no auto-rescale; we set x below
+    if (pinned) plot.setScale('x', { min: xmin as number, max: xmax as number });
   });
 </script>
 
