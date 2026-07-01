@@ -78,7 +78,7 @@
             tipEl.style.display = 'flex';
             const px = o.left - wr.left + left;
             const py = o.top - wr.top + ((u.cursor.top as number | null | undefined) ?? 0);
-            const { left: cx, flipY } = clampTooltip(px, py, tipEl.offsetWidth, tipEl.offsetHeight, o.width, o.height);
+            const { left: cx, flipY } = clampTooltip(px, py, tipEl.offsetWidth, tipEl.offsetHeight, o.width);
             tipEl.style.left = `${cx}px`;
             tipEl.style.top = `${py}px`;
             tipEl.style.transform = flipY ? 'translate(-50%, 8px)' : 'translate(-50%, calc(-100% - 8px))';
