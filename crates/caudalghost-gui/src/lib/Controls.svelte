@@ -15,7 +15,7 @@
   <button onclick={cycleUnits}>unidades: <b>{unitLabel(live.units)}</b></button>
   <button class:active={live.paused} onclick={togglePause}>{live.paused ? '▶ reanudar' : '⏸ pausa'}</button>
   <button class:active={live.showAll} onclick={toggleShowAll}>incluir lo</button>
-  <span class="sig">Hecho con <span class="h">❤</span> por Parlox Network</span>
+  <span class="sig"><span class="ver">v{__APP_VERSION__}</span> | Hecho con <span class="h">❤</span> por Parlox Network</span>
 </footer>
 
 <style>
@@ -26,4 +26,5 @@
   button b { color: var(--cg-accent); }
   .sig { margin-left: auto; font-size: 11px; color: var(--cg-text-tertiary); }
   .sig .h { color: var(--cg-parlox-signature); }
+  .sig .ver { font-family: var(--cg-font-mono); }
 </style>
