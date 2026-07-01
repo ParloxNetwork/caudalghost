@@ -109,7 +109,11 @@ fn history(rango: String) -> Result<HistoryData, String> {
         Response::Error { message } => return Err(message),
         _ => return Err("respuesta inesperada (apps)".into()),
     };
-    let hosts = match ipc::call(&Request::TopRemotes { start, end, app: None })? {
+    let hosts = match ipc::call(&Request::TopRemotes {
+        start,
+        end,
+        app: None,
+    })? {
         Response::TopRemotes { rows } => rows,
         Response::Error { message } => return Err(message),
         _ => return Err("respuesta inesperada (hosts)".into()),
