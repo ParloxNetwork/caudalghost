@@ -5,7 +5,7 @@
   import { formatUnits, type UnitMode } from './format';
   import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints, fineAxisLabels } from './axis-time';
   import { clampTooltip } from './chart-geom';
-  import { liveTicks, liveLabel } from './live-axis';
+  import { liveTicks, liveLabel, smoothNow } from './live-axis';
 
   let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined, flow = false }:
     { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean; xmin?: number; xmax?: number; flow?: boolean } = $props();
@@ -13,6 +13,12 @@
   let el: HTMLDivElement;
   let tipEl: HTMLDivElement;
   let plot: uPlot | undefined;
+  let latestTs = 0;
+  let arrivalPerf = 0;
+  let flowW = 60;
+  let rafId = 0;
+  const reducedMotion = () =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function spanSecs(): number { return ts.length > 1 ? ts[ts.length - 1] - ts[0] : 0; }
   function fmtTime(sec: number): string {
@@ -126,16 +132,32 @@
     const h = interactive ? 240 : 220;
     const ro = new ResizeObserver(() => p.setSize({ width: el.clientWidth, height: h }));
     ro.observe(el);
-    return () => { ro.disconnect(); p.destroy(); plot = undefined; if (tipEl) tipEl.style.display = 'none'; };
+    if (flow && !reducedMotion()) {
+      const tick = () => {
+        if (plot && latestTs) {
+          const now = smoothNow(latestTs, (performance.now() - arrivalPerf) / 1000, 1.25);
+          plot.setScale('x', { min: now - flowW, max: now });
+        }
+        rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    }
+    return () => { cancelAnimationFrame(rafId); rafId = 0; ro.disconnect(); p.destroy(); plot = undefined; if (tipEl) tipEl.style.display = 'none'; };
   });
 
-  // datos: actualiza sin recrear (setData resetea el zoom al cambiar de rango, lo cual es deseable).
+  // datos: actualiza sin recrear. En histórico ancla el eje; en flow lo maneja el rAF.
   $effect(() => {
-    void ts; void rx; void tx; void xmin; void xmax;
+    void ts; void rx; void tx; void xmin; void xmax; void flow;
     if (!plot) return;
     const pinned = interactive && xmin != null && xmax != null && xmax > xmin;
-    plot.setData(makeData(), !pinned); // pinned: no auto-rescale; we set x below
+    const flowing = flow && !reducedMotion();
+    plot.setData(makeData(), !(pinned || flowing)); // pinned/flowing: no auto-rescale
     if (pinned) plot.setScale('x', { min: xmin as number, max: xmax as number });
+    if (flowing && ts.length) {
+      latestTs = ts[ts.length - 1];
+      arrivalPerf = performance.now();
+      flowW = ts.length > 1 ? ts[ts.length - 1] - ts[0] : 60;
+    }
   });
 </script>
 
