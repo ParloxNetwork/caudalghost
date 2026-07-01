@@ -5,9 +5,10 @@
   import { formatUnits, type UnitMode } from './format';
   import { chooseTier, fmtFine, fmtCoarse, coarseMidpoints, fineAxisLabels } from './axis-time';
   import { clampTooltip } from './chart-geom';
+  import { liveTicks, liveLabel } from './live-axis';
 
-  let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined }:
-    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean; xmin?: number; xmax?: number } = $props();
+  let { ts, rx, tx, units, interactive = false, xmin = undefined, xmax = undefined, flow = false }:
+    { ts: number[]; rx: number[]; tx: number[]; units: UnitMode; interactive?: boolean; xmin?: number; xmax?: number; flow?: boolean } = $props();
   let wrapEl: HTMLDivElement;
   let el: HTMLDivElement;
   let tipEl: HTMLDivElement;
@@ -28,36 +29,46 @@
 
   function makeOpts(w: number): uPlot.Options {
     const h = interactive ? 240 : 220;
+    const axesInteractive: uPlot.Axis[] = [
+      // Nivel fino (X, tiempo): reformatea cada tick con el tier del span visible.
+      // `incrs` de minuto-para-arriba: evita ticks sub-minuto que duplicarían "HH:MM" en la vista de 5 min.
+      { scale: 'x', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 28,
+        incrs: [60, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000, 31536000],
+        values: (u, splits) => {
+          const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
+          return fineAxisLabels(splits as number[], tier);
+        } },
+      // Eje Y (unidades).
+      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+        values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
+      // Nivel grueso (X, fechas): etiquetas centradas bajo cada día/mes/año, sin grid ni ticks.
+      { scale: 'x', side: 2, stroke: '#5A7079', grid: { show: false }, ticks: { show: false }, size: 16, gap: 2,
+        splits: (u, _ai, min, max) => coarseMidpoints(min, max, chooseTier(max - min)),
+        values: (u, splits) => {
+          const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
+          return splits.map((v) => fmtCoarse(v as number, tier));
+        } },
+    ];
+    const axesDefault: uPlot.Axis[] = [
+      { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 32 },
+      { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+        values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
+    ];
+    const axesFlow: uPlot.Axis[] = [
+      { scale: 'x', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 28,
+        splits: (u, _ai, min, max) => liveTicks(min, max),
+        values: (u, splits) => splits.map((v) => liveLabel(v as number, u.scales.x.max ?? 0)) },
+      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+        values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
+    ];
+    const axes = interactive ? axesInteractive : flow ? axesFlow : axesDefault;
     return {
       width: w,
       height: h,
       cursor: { y: false, drag: { x: interactive, y: false, setScale: interactive } },
       legend: { show: false },
       scales: { x: { time: true } },
-      axes: interactive ? [
-        // Nivel fino (X, tiempo): reformatea cada tick con el tier del span visible.
-        // `incrs` de minuto-para-arriba: evita ticks sub-minuto que duplicarían "HH:MM" en la vista de 5 min.
-        { scale: 'x', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 28,
-          incrs: [60, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000, 31536000],
-          values: (u, splits) => {
-            const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
-            return fineAxisLabels(splits as number[], tier);
-          } },
-        // Eje Y (unidades).
-        { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
-          values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
-        // Nivel grueso (X, fechas): etiquetas centradas bajo cada día/mes/año, sin grid ni ticks.
-        { scale: 'x', side: 2, stroke: '#5A7079', grid: { show: false }, ticks: { show: false }, size: 16, gap: 2,
-          splits: (u, _ai, min, max) => coarseMidpoints(min, max, chooseTier(max - min)),
-          values: (u, splits) => {
-            const s = u.scales.x; const tier = chooseTier(((s.max ?? 0) - (s.min ?? 0)));
-            return splits.map((v) => fmtCoarse(v as number, tier));
-          } },
-      ] : [
-        { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 32 },
-        { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
-          values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
-      ],
+      axes,
       series: [
         {},
         { label: 'rx', stroke: '#2DD4BF', width: 2, fill: 'rgba(45,212,191,0.18)' },
@@ -107,7 +118,7 @@
 
   // init: crea/recrea el plot solo ante cambios de units/interactive (re-aplica formateo/cursor).
   $effect(() => {
-    void units; void interactive;
+    void units; void interactive; void flow;
     if (!el) return;
     plot?.destroy();
     const p = new uPlot(makeOpts(el.clientWidth || 600), untrack(() => makeData()), el);

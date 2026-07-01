@@ -64,7 +64,7 @@
               <span class="tx">↑ {formatUnits(rate.tx, live.units)}/s</span>
             </span>
           </div>
-          <Chart ts={series.ts} rx={series.rx} tx={series.tx} units={live.units} />
+          <Chart ts={series.ts} rx={series.rx} tx={series.tx} units={live.units} flow />
           {#if series.ts.length < 8}<p class="hint">Acumulando caudal…</p>{/if}
         </section>
         <section class="grid">
