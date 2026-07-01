@@ -12,7 +12,7 @@ pub struct Window {
 // Nota: "ayer"/"dia:" asumen días de 86 400 s; en cambios DST el corte se desvía ±1 h. Aceptado en F1.
 // Si la medianoche local no existe (gap de spring-forward), local_midnight propaga Err en lugar de fabricar un valor.
 
-/// Tokens: 5m, 1h, 24h, 7d, 30d, 90d, 365d, hoy, ayer, este-mes, este-anio, dia:YYYY-MM-DD
+/// Tokens: 5m, 1h, 24h, 7d, 30d, 90d, 365d, hoy, ayer, este-mes, este-anio, dia:YYYY-MM-DD, rango:YYYY-MM-DD:YYYY-MM-DD
 pub fn resolve(token: &str, now: DateTime<Local>) -> Result<Window, String> {
     let end = now.timestamp();
     let local_midnight = |d: NaiveDate| -> Result<i64, String> {
@@ -55,6 +55,23 @@ pub fn resolve(token: &str, now: DateTime<Local>) -> Result<Window, String> {
             Window {
                 start: s,
                 end: s + 86_400,
+            }
+        }
+        t if t.starts_with("rango:") => {
+            let rest = &t["rango:".len()..];
+            let (a, b) = rest.split_once(':').ok_or_else(|| {
+                format!("rango inválido '{t}', formato rango:YYYY-MM-DD:YYYY-MM-DD")
+            })?;
+            let d1 = NaiveDate::parse_from_str(a, "%Y-%m-%d")
+                .map_err(|_| format!("fecha inicial inválida en '{t}'"))?;
+            let d2 = NaiveDate::parse_from_str(b, "%Y-%m-%d")
+                .map_err(|_| format!("fecha final inválida en '{t}'"))?;
+            if d1 > d2 {
+                return Err(format!("rango invertido: {d1} posterior a {d2}"));
+            }
+            Window {
+                start: local_midnight(d1)?,
+                end: local_midnight(d2)? + 86_400,
             }
         }
         _ => return Err(format!("rango desconocido: '{token}'")),
@@ -210,6 +227,40 @@ mod tests {
     fn token_invalido() {
         assert!(resolve("banana", now()).is_err());
         assert!(resolve("dia:junio", now()).is_err());
+    }
+
+    #[test]
+    fn rango_de_fechas_hasta_inclusivo() {
+        let w = resolve("rango:2026-06-01:2026-06-05", now()).unwrap();
+        let d1 = Local
+            .with_ymd_and_hms(2026, 6, 1, 0, 0, 0)
+            .unwrap()
+            .timestamp();
+        let d5 = Local
+            .with_ymd_and_hms(2026, 6, 5, 0, 0, 0)
+            .unwrap()
+            .timestamp();
+        assert_eq!(
+            w,
+            Window {
+                start: d1,
+                end: d5 + 86_400
+            }
+        ); // incluye todo el 5
+    }
+
+    #[test]
+    fn rango_de_un_solo_dia_equivale_a_dia() {
+        let r = resolve("rango:2026-06-01:2026-06-01", now()).unwrap();
+        let d = resolve("dia:2026-06-01", now()).unwrap();
+        assert_eq!(r, d);
+    }
+
+    #[test]
+    fn rango_invertido_o_invalido_es_error() {
+        assert!(resolve("rango:2026-06-05:2026-06-01", now()).is_err()); // A > B
+        assert!(resolve("rango:2026-06-01", now()).is_err()); // falta B
+        assert!(resolve("rango:junio:julio", now()).is_err()); // no ISO
     }
 
     use crate::proto::Bucket;
