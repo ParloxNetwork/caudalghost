@@ -17,4 +17,6 @@ test('liveLabel: relativo al ahora (max)', () => {
   expect(liveLabel(85, 100)).toBe('15s');
   expect(liveLabel(40, 100)).toBe('1 min');   // 60s
   expect(liveLabel(10, 100)).toBe('1 min');   // 90s → floor
+  expect(liveLabel(41, 100)).toBe('59s');    // último antes del corte a minutos
+  expect(liveLabel(105, 100)).toBe('ahora'); // t > max (ago negativo) → ahora
 });
