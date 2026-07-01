@@ -11,3 +11,20 @@ test('resetHistory vacía series/total/apps/hosts in-place', () => {
   resetHistory(h);
   expect(h).toEqual({ series: [], total: [], apps: [], hosts: [] });
 });
+
+import { rangeToken, prettyRangeLabel } from './history-derive';
+const RS = [{ token: '7d', label: '7 días' }, { token: 'ayer', label: 'ayer' }];
+
+test('rangeToken válido e inválido', () => {
+  expect(rangeToken('2026-06-01', '2026-06-05')).toBe('rango:2026-06-01:2026-06-05');
+  expect(rangeToken('2026-06-05', '2026-06-01')).toBeNull(); // desde > hasta
+  expect(rangeToken('', '2026-06-05')).toBeNull();
+  expect(rangeToken('2026-06-01', '2026-06-01')).toBe('rango:2026-06-01:2026-06-01'); // un día vale
+});
+
+test('prettyRangeLabel', () => {
+  expect(prettyRangeLabel('7d', RS)).toBe('7 días');
+  expect(prettyRangeLabel('dia:2026-06-01', RS)).toBe('2026-06-01');
+  expect(prettyRangeLabel('rango:2026-06-01:2026-06-05', RS)).toBe('2026-06-01 – 2026-06-05');
+  expect(prettyRangeLabel('desconocido', RS)).toBe('desconocido');
+});
