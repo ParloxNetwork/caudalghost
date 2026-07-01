@@ -1,6 +1,6 @@
 {
   "name": "caudalghost-gui",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "",
   "type": "module",
   "scripts": {
@@ -25,6 +25,7 @@
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tauri-apps/cli": "^2",
+    "@types/node": "^26.1.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",
