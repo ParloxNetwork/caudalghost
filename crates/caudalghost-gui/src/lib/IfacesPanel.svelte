@@ -13,6 +13,7 @@
 
 <section class="panel">
   <div class="lbl">interfaces · ahora</div>
+  <div class="scroll">
   <div class="rows">
     {#each rows as r, i (r.iface)}
       <div class="row" class:first={i === 0}>
@@ -26,11 +27,14 @@
       {/if}
     {/each}
   </div>
+  </div>
 </section>
 
 <style>
-  .panel { background: var(--cg-surface); border: 1px solid var(--cg-border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .panel { background: var(--cg-surface); border: 1px solid var(--cg-border); border-radius: 10px; padding: 12px 14px; min-width: 0; position: relative; overflow: hidden; min-height: 180px; }
   .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--cg-text-tertiary); margin-bottom: 8px; }
+  /* Scroll interno: las interfaces nunca agrandan el layout; Apps manda la altura. */
+  .scroll { position: absolute; left: 14px; right: 8px; top: 32px; bottom: 12px; overflow-y: auto; }
   .rows { display: flex; flex-direction: column; gap: 2px; }
   .row { display: grid; grid-template-columns: 80px auto auto 1fr; align-items: center; gap: 10px; font-size: 12px; color: var(--cg-text); }
   .row.first { font-weight: 700; }

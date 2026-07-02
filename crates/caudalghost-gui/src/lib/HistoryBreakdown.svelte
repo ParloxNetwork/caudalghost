@@ -7,13 +7,14 @@
   const catColor = (i: number) => (i < CAT.length ? CAT[i] : 'var(--cg-cat-other)');
 
   type Row = { name: string; rx: number; tx: number };
-  function withPct(items: Row[], limit = 8) {
+  function withPct(items: Row[], limit = 10) {
     const sorted = [...items].sort((a, b) => (b.rx + b.tx) - (a.rx + a.tx)).slice(0, limit);
     const total = sorted.reduce((s, r) => s + r.rx + r.tx, 0) || 1;
     return sorted.map((r, i) => ({ ...r, pct: ((r.rx + r.tx) / total) * 100, color: catColor(i) }));
   }
   const apps = $derived(withPct(history.apps.map((a) => ({ name: a.app, rx: a.rx, tx: a.tx }))));
-  const ifaces = $derived(withPct(history.total.map((t) => ({ name: t.iface, rx: t.rx, tx: t.tx }))));
+  // Interfaces del histórico: sin recorte (ilimitadas). Apps sí al top 10.
+  const ifaces = $derived(withPct(history.total.map((t) => ({ name: t.iface, rx: t.rx, tx: t.tx })), Infinity));
 </script>
 
 <div class="grid">

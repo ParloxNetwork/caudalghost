@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "caudalghost-core"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "caudalghost-gui"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "caudalghost-core",
