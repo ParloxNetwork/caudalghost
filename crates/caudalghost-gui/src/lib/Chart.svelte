@@ -169,7 +169,16 @@
     const pinned = interactive && xmin != null && xmax != null && xmax > xmin;
     const flowing = flow && !reducedMotion();
     plot.setData(makeData(), !(pinned || flowing)); // pinned/flowing: no auto-rescale
-    if (pinned) plot.setScale('x', { min: xmin as number, max: xmax as number });
+    if (pinned) {
+      const lo = xmin as number;
+      const hi = xmax as number;
+      // El histórico por-minuto va ~1-2 min por detrás de "ahora" (el minuto en curso aún no
+      // está en el rollup). Terminamos el eje en el último dato para no dejar un hueco vacío al
+      // final (se notaba mucho en la vista de 5 min). El borde izquierdo sigue anclado a la ventana.
+      const last = ts.length ? ts[ts.length - 1] : hi;
+      const right = last > lo ? Math.min(hi, last) : hi;
+      plot.setScale('x', { min: lo, max: right });
+    }
     if (flowing && ts.length) {
       latestTs = ts[ts.length - 1];
       arrivalPerf = performance.now();

@@ -2,6 +2,14 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.5.2] — 2026-07-01
+
+### Corregido (GUI)
+
+- **Histórico sin "corte" al final:** el eje del gráfico termina en el último dato disponible en vez de en el
+  reloj "ahora", así en ventanas cortas (5 min, 1 h) ya no se ve un hueco vacío por el minuto en curso (que aún
+  no está en el rollup por-minuto). Ayer / 24 h / etc. no cambian; el borde izquierdo sigue anclado a la ventana.
+
 ## [0.5.1] — 2026-07-01
 
 ### Corregido (GUI)
