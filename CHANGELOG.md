@@ -2,6 +2,13 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.5.1] — 2026-07-01
+
+### Corregido (GUI)
+
+- **Eje Y sin recortes:** el ancho del eje Y se ajusta al rótulo más largo (p. ej. "1023.9 MiB"), así los números
+  ya no se cortan contra el borde izquierdo, sin importar cuántos dígitos tengan (tanto en Histórico como En vivo).
+
 ## [0.5.0] — 2026-07-01
 
 ### Vista En vivo (GUI)
