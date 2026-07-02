@@ -20,6 +20,21 @@
   const reducedMotion = () =>
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // Ancho del eje Y ajustado al rótulo más largo: evita que se recorte con muchos dígitos.
+  function yAxisSize(self: uPlot, values: string[], axisIdx: number): number {
+    const axis = self.axes[axisIdx];
+    const ticksSize = typeof axis.ticks?.size === 'number' ? axis.ticks.size : 0;
+    const gap = typeof axis.gap === 'number' ? axis.gap : 0;
+    const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), '');
+    let labelW = 0;
+    const font = axis.font;
+    if (longest && font) {
+      self.ctx.font = font;
+      labelW = self.ctx.measureText(longest).width / (window.devicePixelRatio || 1);
+    }
+    return Math.ceil(ticksSize + gap + labelW) + 6; // +6 de margen
+  }
+
   function spanSecs(): number { return ts.length > 1 ? ts[ts.length - 1] - ts[0] : 0; }
   function fmtTime(sec: number): string {
     const d = new Date(sec * 1000);
@@ -45,7 +60,7 @@
           return fineAxisLabels(splits as number[], tier);
         } },
       // Eje Y (unidades).
-      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: yAxisSize,
         values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
       // Nivel grueso (X, fechas): etiquetas centradas bajo cada día/mes/año, sin grid ni ticks.
       { scale: 'x', side: 2, stroke: '#5A7079', grid: { show: false }, ticks: { show: false }, size: 16, gap: 2,
@@ -57,14 +72,14 @@
     ];
     const axesDefault: uPlot.Axis[] = [
       { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 32 },
-      { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+      { stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: yAxisSize,
         values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
     ];
     const axesFlow: uPlot.Axis[] = [
       { scale: 'x', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 28,
         splits: (u, _ai, min, max) => liveTicks(min, max),
         values: (u, splits) => splits.map((v) => liveLabel(v as number, u.scales.x.max ?? 0)) },
-      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: 60,
+      { scale: 'y', stroke: '#5A7079', grid: { stroke: '#1D2D34', width: 1 }, ticks: { stroke: '#1D2D34' }, size: yAxisSize,
         values: (_u, vals) => vals.map((v) => formatUnits(v, units)) },
     ];
     const axes = interactive ? axesInteractive : flow ? axesFlow : axesDefault;
