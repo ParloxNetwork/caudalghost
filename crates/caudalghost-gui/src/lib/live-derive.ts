@@ -26,7 +26,7 @@ export function currentRate(samples: Sample[], showAll: boolean) {
 }
 
 /** Top apps agregadas sobre la ventana, desc por total. */
-export function topApps(samples: Sample[], limit = 8) {
+export function topApps(samples: Sample[], limit = 10) {
   const acc = new Map<string, { rx: number; tx: number }>();
   for (const s of samples) for (const a of s.apps) {
     const e = acc.get(a.app) ?? { rx: 0, tx: 0 };
@@ -37,7 +37,7 @@ export function topApps(samples: Sample[], limit = 8) {
 }
 
 /** Top hosts remotos (FQDN) agregados sobre la ventana, desc por total. */
-export function topHosts(samples: Sample[], limit = 8) {
+export function topHosts(samples: Sample[], limit = 10) {
   const acc = new Map<string, { rx: number; tx: number }>();
   for (const s of samples) for (const f of s.flows ?? []) {
     const e = acc.get(f.host) ?? { rx: 0, tx: 0 };

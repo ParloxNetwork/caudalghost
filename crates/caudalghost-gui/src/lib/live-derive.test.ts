@@ -20,3 +20,11 @@ test('ifaceRows alinea wlan0 tardía', () => {
   const wlan = r.find((x) => x.iface === 'wlan0')!;
   expect(wlan.serie).toEqual([0, 150]);
 });
+test('topApps corta al top 10 por defecto', () => {
+  const many: Sample = { ts: 1, deltas: [], apps: Array.from({ length: 15 }, (_, i) => ({ app: `app${i}`, rx: i, tx: 0 })) };
+  expect(topApps([many]).length).toBe(10);
+});
+test('topHosts corta al top 10 por defecto', () => {
+  const many: Sample = { ts: 1, deltas: [], apps: [], flows: Array.from({ length: 15 }, (_, i) => ({ app: 'a', host: `h${i}`, rx: i, tx: 0 })) };
+  expect(topHosts([many]).length).toBe(10);
+});

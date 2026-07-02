@@ -89,7 +89,8 @@
 
 <style>
   .app { height: calc(100vh - 44px); display: flex; flex-direction: column; }
-  main { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  /* min-height: 0 permite que el flex item se acote y su overflow:auto haga scroll de verdad. */
+  main { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
   .offline { margin: auto; color: var(--cg-text-secondary); font-size: 14px; max-width: 46ch; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .offline p { margin: 0; }
   .offline .ot { color: var(--cg-text); font-weight: 600; }

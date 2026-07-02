@@ -1,12 +1,20 @@
 <script lang="ts">
   import { history, RANGES, loadHistory } from '$lib/history.svelte';
   import { rangeToken } from '$lib/history-derive';
+  import DateField from '$lib/DateField.svelte';
   let mode = $state<'dia' | 'rango'>('dia');
   let day = $state('');
   let desde = $state('');
   let hasta = $state('');
-  function pickDay() { if (day) loadHistory(`dia:${day}`); }
+  let hastaOpen = $state(false);
   const token = $derived(rangeToken(desde, hasta));
+
+  // Día: aplicar en cuanto se elige la fecha (el calendario propio se cierra solo).
+  function pickDay(iso: string) { day = iso; loadHistory(`dia:${iso}`); }
+  // Rango: elegir "Desde" abre solo el calendario de "Hasta".
+  function pickDesde(iso: string) { desde = iso; hastaOpen = true; }
+  // Rango: elegir "Hasta" aplica el rango si es válido.
+  function pickHasta(iso: string) { hasta = iso; const t = rangeToken(desde, iso); if (t) loadHistory(t); }
   function applyRange() { if (token) loadHistory(token); }
 </script>
 
@@ -25,11 +33,11 @@
       <button class:on={mode === 'rango'} onclick={() => (mode = 'rango')}>Rango</button>
     </div>
     {#if mode === 'dia'}
-      <input type="date" bind:value={day} onchange={pickDay} aria-label="Día específico" />
+      <DateField value={day} placeholder="Día específico" onpick={pickDay} />
     {:else}
-      <input type="date" bind:value={desde} aria-label="Desde" />
+      <DateField value={desde} placeholder="Desde" onpick={pickDesde} />
       <span class="dash">–</span>
-      <input type="date" bind:value={hasta} aria-label="Hasta" />
+      <DateField bind:open={hastaOpen} value={hasta} placeholder="Hasta" onpick={pickHasta} />
       <button class="apply" disabled={!token} onclick={applyRange}>Ver</button>
     {/if}
   </div>
@@ -48,5 +56,4 @@
   .toggle { display: flex; gap: 2px; }
   .toggle button { padding: 3px 8px; }
   .dash { color: var(--cg-text-tertiary); }
-  input[type="date"] { font: inherit; font-size: 11px; background: var(--cg-surface); color: var(--cg-text-secondary); border: 1px solid var(--cg-border); border-radius: 6px; padding: 2px 6px; color-scheme: dark; }
 </style>
