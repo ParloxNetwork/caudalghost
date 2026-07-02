@@ -23,16 +23,18 @@
   // Ancho del eje Y ajustado al rótulo más largo: evita que se recorte con muchos dígitos.
   function yAxisSize(self: uPlot, values: string[], axisIdx: number): number {
     const axis = self.axes[axisIdx];
-    const ticksSize = typeof axis.ticks?.size === 'number' ? axis.ticks.size : 0;
-    const gap = typeof axis.gap === 'number' ? axis.gap : 0;
+    const ticksSize = axis.ticks && typeof axis.ticks.size === 'number' ? axis.ticks.size : 10;
+    const gap = typeof axis.gap === 'number' ? axis.gap : 5;
     const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), '');
     let labelW = 0;
-    const font = axis.font;
-    if (longest && font) {
+    if (longest) {
+      // uPlot guarda axis.font como [fuente, tamaño] (pxRatio-escalado) en runtime,
+      // aunque el tipo TS diga string; medimos con la fuente real y pasamos a px CSS.
+      const font = (axis.font as unknown as [string, number])[0];
       self.ctx.font = font;
       labelW = self.ctx.measureText(longest).width / (window.devicePixelRatio || 1);
     }
-    return Math.ceil(ticksSize + gap + labelW) + 6; // +6 de margen
+    return Math.ceil(ticksSize + gap + labelW) + 4;
   }
 
   function spanSecs(): number { return ts.length > 1 ? ts[ts.length - 1] - ts[0] : 0; }
