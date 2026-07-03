@@ -2,6 +2,24 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.7.2] — 2026-07-03
+
+### CLI — features (cliente-only, sin tocar el daemon ni el protocolo)
+
+- **Subcomando nuevo `serie <RANGO>`:** timeline del **caudal total** (todas las interfaces sumadas) por
+  cubos temporales. En `-o table` dibuja una **sparkline** del total + una tabla `tiempo │ rx │ tx │ total`
+  con fila `Σ total`; en `-o json/csv/ndjson` sale por el mismo contrato que el resto (`"schema":1`, ndjson
+  con bytes crudos por línea). El **cubo** (`minute`/`hour`/`day`) se elige automáticamente según el rango
+  o se fija con `--bucket`. Usa la petición `Series` ya existente del protocolo.
+- **Proyección de columnas `--fields <a,b,c>`:** limita la salida de **csv/json/ndjson** a las columnas
+  pedidas (en el orden pedido). Nombres válidos = los de la cabecera del comando (`app`/`host`/`interfaz`/
+  `tiempo`, `rx`, `tx`, `total`); en json/ndjson los valores salen **crudos** (números), aptos para `jq`.
+  Con `-o table` o en `ping` → error claro. **Sin `--fields`, la salida no cambia** respecto a 0.7.1.
+- **Refresco periódico `--watch` / `--interval <SECS>`:** reejecuta un comando de datos cada `SECS`
+  segundos (default 2) limpiando pantalla, hasta `Ctrl-C` — un monitor ligero en la terminal sin entrar a
+  la TUI. Solo `-o table`; con formatos máquina → error (para pipelines está el bucle de shell). El primer
+  render no borra la pantalla, así un error inmediato no la limpia.
+
 ## [0.7.1] — 2026-07-03
 
 ### CLI — pulido
