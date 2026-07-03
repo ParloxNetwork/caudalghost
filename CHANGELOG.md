@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.5] — 2026-07-03
+
+### TUI (`caudalghost live`)
+
+Pulido del **resaltado por umbral** en los paneles de apps e interfaces (colorea la fila cuando una
+entidad está más activa de lo normal *para ella misma*).
+
+- **Suavizado (10 s):** el nivel se calcula sobre la media móvil de los últimos 10 s comparada con los
+  percentiles de la propia serie **igualmente suavizada** (sostenido vs sostenido). El color deja de
+  parpadear de segundo a segundo y refleja actividad sostenida, no un pico de un solo segundo.
+- **Sin rojo alarmista:** el nivel "alto" pasa de rojo (poco legible como texto) a un **naranja cálido**
+  (`#F28C28`); el "elevado" se queda en amarillo; una entidad tranquila no se colorea. El estado
+  "desconectado" de la cabecera sigue en rojo (ese sí es un error real).
+
 ## [0.6.4] — 2026-07-03
 
 ### TUI (`caudalghost live`)
