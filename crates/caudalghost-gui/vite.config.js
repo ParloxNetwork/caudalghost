@@ -2,14 +2,23 @@ import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import { readFileSync } from "node:fs";
 
-const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+// Fuente de verdad ÚNICA de la versión: el Cargo.toml del workspace raíz. Así el footer de la GUI
+// SIEMPRE coincide con la versión del release (.deb) y no se desincroniza (package.json vive fuera del
+// workspace y quedaba atrás en los releases que solo tocaban el daemon/CLI).
+function workspaceVersion() {
+  const toml = readFileSync(new URL("../../Cargo.toml", import.meta.url), "utf8");
+  const m = toml.match(/\[workspace\.package\][\s\S]*?\bversion\s*=\s*"([^"]+)"/);
+  if (!m) throw new Error("no pude leer [workspace.package] version en ../../Cargo.toml");
+  return m[1];
+}
+const APP_VERSION = workspaceVersion();
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
