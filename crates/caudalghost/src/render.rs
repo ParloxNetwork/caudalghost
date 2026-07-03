@@ -1,4 +1,5 @@
-use caudalghost_core::proto::{AppRow, RemoteRow, TotalRow};
+use caudalghost_core::proto::{AppRow, Bucket, RemoteRow, SeriePoint, TotalRow};
+use chrono::{Local, TimeZone};
 use comfy_table::{presets::UTF8_FULL_CONDENSED, Cell, CellAlignment, Table};
 use owo_colors::{OwoColorize, Stream::Stdout};
 use serde::Serialize;
@@ -139,6 +140,59 @@ impl Tabulable for RemoteRow {
     }
 }
 
+/// Fila de presentación para `serie`: un punto de la serie temporal con la
+/// etiqueta de tiempo ya formateada según el cubo. Serializa CRUDO (ts/rx/tx)
+/// para json/ndjson (apto para jq); la etiqueta es solo para table/csv.
+#[derive(Serialize)]
+pub struct SerieRow {
+    pub ts: i64,
+    pub rx: u64,
+    pub tx: u64,
+    #[serde(skip)]
+    etiqueta: String,
+}
+
+impl SerieRow {
+    /// Formatea `ts` (epoch UTC) a hora LOCAL según el cubo.
+    pub fn desde(p: &SeriePoint, bucket: Bucket) -> SerieRow {
+        let fmt = match bucket {
+            Bucket::Minute | Bucket::Hour => "%m-%d %H:%M",
+            Bucket::Day => "%Y-%m-%d",
+        };
+        let etiqueta = Local
+            .timestamp_opt(p.ts, 0)
+            .single()
+            .map(|dt| dt.format(fmt).to_string())
+            .unwrap_or_else(|| p.ts.to_string());
+        SerieRow {
+            ts: p.ts,
+            rx: p.rx,
+            tx: p.tx,
+            etiqueta,
+        }
+    }
+}
+
+impl Tabulable for SerieRow {
+    fn cabecera() -> Vec<&'static str> {
+        vec!["tiempo", "rx", "tx", "total"]
+    }
+    fn campos(&self, u: UnitMode) -> Vec<String> {
+        vec![
+            self.etiqueta.clone(),
+            format_units(self.rx, u),
+            format_units(self.tx, u),
+            format_units(self.rx + self.tx, u),
+        ]
+    }
+}
+
+impl ConRxTx for SerieRow {
+    fn rx_tx(&self) -> (u64, u64) {
+        (self.rx, self.tx)
+    }
+}
+
 /// Fila de suma (Σ) para las tablas de totales/top: etiqueta concisa y fija
 /// (no deriva del título, que puede ser largo o repetir el símbolo Σ).
 /// Mismo layout que `Tabulable::campos` para poder añadirse como fila extra
@@ -176,6 +230,63 @@ impl ConRxTx for RemoteRow {
     }
 }
 
+/// Valor CRUDO (numérico/string) de una columna por su nombre de cabecera,
+/// para la proyección `--fields` en json/ndjson (los números quedan números).
+pub trait Proyectable {
+    fn valor_crudo(&self, col: &str) -> Option<serde_json::Value>;
+}
+
+impl Proyectable for TotalRow {
+    fn valor_crudo(&self, col: &str) -> Option<serde_json::Value> {
+        match col {
+            // El nombre de columna debe coincidir con `Tabulable::cabecera()` ("interfaz"),
+            // porque `--fields` se valida contra la cabecera: si aquí dijera "iface", el
+            // campo pasaría la validación pero se dropearía en silencio en json/ndjson.
+            "interfaz" => Some(serde_json::json!(self.iface)),
+            "rx" => Some(serde_json::json!(self.rx)),
+            "tx" => Some(serde_json::json!(self.tx)),
+            "total" => Some(serde_json::json!(self.rx + self.tx)),
+            _ => None,
+        }
+    }
+}
+
+impl Proyectable for AppRow {
+    fn valor_crudo(&self, col: &str) -> Option<serde_json::Value> {
+        match col {
+            "app" => Some(serde_json::json!(self.app)),
+            "rx" => Some(serde_json::json!(self.rx)),
+            "tx" => Some(serde_json::json!(self.tx)),
+            "total" => Some(serde_json::json!(self.rx + self.tx)),
+            _ => None,
+        }
+    }
+}
+
+impl Proyectable for RemoteRow {
+    fn valor_crudo(&self, col: &str) -> Option<serde_json::Value> {
+        match col {
+            "host" => Some(serde_json::json!(self.host)),
+            "rx" => Some(serde_json::json!(self.rx)),
+            "tx" => Some(serde_json::json!(self.tx)),
+            "total" => Some(serde_json::json!(self.rx + self.tx)),
+            _ => None,
+        }
+    }
+}
+
+impl Proyectable for SerieRow {
+    fn valor_crudo(&self, col: &str) -> Option<serde_json::Value> {
+        match col {
+            "tiempo" => Some(serde_json::json!(self.ts)),
+            "rx" => Some(serde_json::json!(self.rx)),
+            "tx" => Some(serde_json::json!(self.tx)),
+            "total" => Some(serde_json::json!(self.rx + self.tx)),
+            _ => None,
+        }
+    }
+}
+
 /// Entrecomilla un campo CSV si contiene coma, comilla o salto de línea
 /// (RFC 4180 mínimo, sin dependencia externa).
 fn csv_campo(s: &str) -> String {
@@ -195,7 +306,15 @@ fn csv_campo(s: &str) -> String {
 /// excepción es la fila `Σ total` de la tabla, que siempre suma TODAS las filas
 /// recibidas en `filas`, no solo las mostradas, para que no sea un subtotal
 /// disfrazado de total.
-pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
+///
+/// `fields`, si viene, proyecta las columnas de `csv`/`json`/`ndjson` a solo
+/// las pedidas (en el orden pedido); `table` lo ignora (nunca se llama con
+/// `fields=Some` para tabla). Con `fields=None` la salida es idéntica a la de
+/// siempre (cero cambio de contrato cuando no se pide proyección).
+// Punto único de salida: agrupa formato/unidades/quiet/color/título/limit/fields
+// deliberadamente en una sola función; empaquetarlos en un struct no aporta claridad.
+#[allow(clippy::too_many_arguments)]
+pub fn emitir<T: Tabulable + ConRxTx + Serialize + Proyectable>(
     filas: &[T],
     fmt: Formato,
     units: UnitMode,
@@ -203,6 +322,7 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
     color: bool,
     titulo_txt: &str,
     limit: Option<usize>,
+    fields: Option<&[String]>,
 ) -> String {
     // `limit` acota las filas mostradas/emitidas en TODOS los formatos. En Table la fila
     // `Σ total` sigue sumando TODAS (total real); los formatos máquina emiten solo las visibles.
@@ -255,40 +375,78 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
                 format!("{cab}\n{cuerpo}")
             }
         }
-        Formato::Json => serde_json::to_string(&serde_json::json!({
-            "schema": 1,
-            "titulo": titulo_txt,
-            "filas": visibles,
-        }))
-        .unwrap_or_default(),
+        Formato::Json => {
+            let filas_json: serde_json::Value = match fields {
+                Some(cols) => visibles
+                    .iter()
+                    .map(|f| proyecta_obj(f, cols))
+                    .collect::<Vec<_>>()
+                    .into(),
+                None => serde_json::json!(visibles),
+            };
+            serde_json::to_string(&serde_json::json!({
+                "schema": 1,
+                "titulo": titulo_txt,
+                "filas": filas_json,
+            }))
+            .unwrap_or_default()
+        }
         Formato::Csv => {
+            let cab = T::cabecera();
+            let idxs: Vec<usize> = match fields {
+                Some(cols) => cols
+                    .iter()
+                    .filter_map(|c| cab.iter().position(|h| h == c))
+                    .collect(),
+                None => (0..cab.len()).collect(),
+            };
             let mut out = String::new();
             out.push_str(
-                &T::cabecera()
+                &idxs
                     .iter()
-                    .map(|c| csv_campo(c))
+                    .map(|&i| csv_campo(cab[i]))
                     .collect::<Vec<_>>()
                     .join(","),
             );
             for fila in visibles {
+                let campos = fila.campos(units);
                 out.push('\n');
                 out.push_str(
-                    &fila
-                        .campos(units)
+                    &idxs
                         .iter()
-                        .map(|c| csv_campo(c))
+                        .map(|&i| csv_campo(&campos[i]))
                         .collect::<Vec<_>>()
                         .join(","),
                 );
             }
             out
         }
-        Formato::Ndjson => visibles
-            .iter()
-            .map(|f| serde_json::to_string(f).unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Formato::Ndjson => match fields {
+            Some(cols) => visibles
+                .iter()
+                .map(|f| serde_json::to_string(&proyecta_obj(f, cols)).unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            None => visibles
+                .iter()
+                .map(|f| serde_json::to_string(f).unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        },
     }
+}
+
+/// Proyecta una fila a un objeto JSON `{col: valor_crudo(col)}` solo con las
+/// columnas pedidas (en el orden pedido); columnas sin valor para el tipo se
+/// omiten. Compartido por las ramas `json`/`ndjson` de `emitir` con `fields`.
+fn proyecta_obj<T: Proyectable>(fila: &T, cols: &[String]) -> serde_json::Value {
+    let mut m = serde_json::Map::new();
+    for c in cols {
+        if let Some(v) = fila.valor_crudo(c) {
+            m.insert(c.clone(), v);
+        }
+    }
+    serde_json::Value::Object(m)
 }
 
 /// Tabla de actividad en vivo: una fila por interfaz con tasas y sparkline.
@@ -340,6 +498,7 @@ mod tests {
             false,
             "hoy",
             None,
+            None,
         );
         assert!(s.contains("firefox") && s.contains("Σ total"));
     }
@@ -366,6 +525,7 @@ mod tests {
             false,
             false,
             "7d",
+            None,
             None,
         );
         assert!(s.contains("github.com") && s.contains("scdn.co") && s.contains("Σ total"));
@@ -441,6 +601,7 @@ mod tests {
             false,
             "total",
             None,
+            None,
         );
         assert!(bin.contains("MiB"));
         let bits = super::emitir(
@@ -450,6 +611,7 @@ mod tests {
             true,
             false,
             "total",
+            None,
             None,
         );
         assert!(bits.contains("Mb") && !bits.contains("MiB"));
@@ -487,6 +649,7 @@ mod tests {
             false,
             "top",
             None,
+            None,
         );
         assert!(csv.lines().next().unwrap().contains("app")); // cabecera
         assert!(csv.contains("firefox"));
@@ -497,6 +660,7 @@ mod tests {
             true,
             false,
             "top",
+            None,
             None,
         );
         assert_eq!(nd.lines().count(), 2); // una fila por línea
@@ -525,6 +689,7 @@ mod tests {
             true,
             false,
             "top",
+            None,
             None,
         );
         // la columna rx queda alineada: el '1 B' de la primera fila lleva padding a la izquierda
@@ -562,6 +727,7 @@ mod tests {
             false,
             "top",
             Some(1),
+            None,
         );
         assert!(s.contains("firefox"), "debe mostrar la primera fila");
         assert!(!s.contains("curl"), "no debe mostrar filas fuera del limit");
@@ -601,6 +767,7 @@ mod tests {
             false,
             "top",
             Some(2),
+            None,
         );
         assert_eq!(nd.lines().count(), 2, "ndjson respeta el limit: {nd}");
         assert!(nd.contains("firefox") && nd.contains("curl") && !nd.contains("ssh"));
@@ -612,6 +779,7 @@ mod tests {
             false,
             "top",
             Some(1),
+            None,
         );
         assert_eq!(csv.lines().count(), 2, "csv = cabecera + 1 fila: {csv}"); // header + 1
         assert!(csv.contains("firefox") && !csv.contains("ssh"));
@@ -623,7 +791,169 @@ mod tests {
             false,
             "top",
             Some(1),
+            None,
         );
         assert!(json.contains("firefox") && !json.contains("curl") && !json.contains("ssh"));
+    }
+
+    #[test]
+    fn serie_row_cabecera_y_serializa_crudo() {
+        use caudalghost_core::proto::{Bucket, SeriePoint};
+        let p = SeriePoint {
+            ts: 1_720_000_000,
+            rx: 100,
+            tx: 20,
+        };
+        let row = super::SerieRow::desde(&p, Bucket::Hour);
+        assert_eq!(
+            super::SerieRow::cabecera(),
+            vec!["tiempo", "rx", "tx", "total"]
+        );
+        let c = row.campos(UnitMode::Binary);
+        assert_eq!(c[0], row_etiqueta(&row)); // etiqueta no vacía
+        assert!(!c[0].is_empty());
+        assert_eq!(c[3], "120 B"); // total = rx+tx
+                                   // json/ndjson: crudo ts/rx/tx, SIN 'etiqueta' ni 'total'
+        let j = serde_json::to_string(&row).unwrap();
+        assert!(
+            j.contains("\"ts\":1720000000") && j.contains("\"rx\":100") && j.contains("\"tx\":20")
+        );
+        assert!(!j.contains("etiqueta") && !j.contains("total"));
+    }
+    fn row_etiqueta(r: &super::SerieRow) -> String {
+        r.campos(UnitMode::Binary)[0].clone()
+    }
+
+    #[test]
+    fn serie_row_etiqueta_por_bucket() {
+        use caudalghost_core::proto::{Bucket, SeriePoint};
+        let p = SeriePoint {
+            ts: 1_720_000_000,
+            rx: 1,
+            tx: 1,
+        };
+        let dia = super::SerieRow::desde(&p, Bucket::Day).campos(UnitMode::Binary)[0].clone();
+        // Day => "YYYY-MM-DD" (10 chars, dos guiones)
+        assert_eq!(dia.len(), 10, "etiqueta día: {dia}");
+        assert_eq!(dia.matches('-').count(), 2);
+        let hora = super::SerieRow::desde(&p, Bucket::Hour).campos(UnitMode::Binary)[0].clone();
+        assert!(hora.contains(':'), "etiqueta hora lleva HH:MM: {hora}");
+    }
+
+    #[test]
+    fn proyectable_valor_crudo_por_tipo() {
+        use caudalghost_core::proto::AppRow;
+        let r = AppRow {
+            app: "firefox".into(),
+            rx: 100,
+            tx: 20,
+        };
+        assert_eq!(
+            super::Proyectable::valor_crudo(&r, "app"),
+            Some(serde_json::json!("firefox"))
+        );
+        assert_eq!(
+            super::Proyectable::valor_crudo(&r, "total"),
+            Some(serde_json::json!(120))
+        );
+        assert_eq!(super::Proyectable::valor_crudo(&r, "nope"), None);
+    }
+
+    #[test]
+    fn emitir_fields_none_identico_a_hoy() {
+        use caudalghost_core::proto::AppRow;
+        let filas = vec![AppRow {
+            app: "a".into(),
+            rx: 1,
+            tx: 2,
+        }];
+        let antes = super::emitir(
+            &filas,
+            Formato::Ndjson,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            None,
+        );
+        assert_eq!(antes, "{\"app\":\"a\",\"rx\":1,\"tx\":2}");
+    }
+
+    #[test]
+    fn emitir_fields_proyecta_csv_en_orden() {
+        use caudalghost_core::proto::AppRow;
+        let filas = vec![AppRow {
+            app: "a".into(),
+            rx: 10,
+            tx: 5,
+        }];
+        let cols = vec!["total".to_string(), "app".to_string()];
+        let csv = super::emitir(
+            &filas,
+            Formato::Csv,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            Some(&cols),
+        );
+        let mut lineas = csv.lines();
+        assert_eq!(lineas.next().unwrap(), "total,app"); // orden pedido
+        assert_eq!(lineas.next().unwrap(), "15 B,a");
+    }
+
+    #[test]
+    fn emitir_fields_proyecta_ndjson_crudo() {
+        use caudalghost_core::proto::AppRow;
+        let filas = vec![AppRow {
+            app: "a".into(),
+            rx: 10,
+            tx: 5,
+        }];
+        let cols = vec!["app".to_string(), "total".to_string()];
+        let nd = super::emitir(
+            &filas,
+            Formato::Ndjson,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            Some(&cols),
+        );
+        let v: serde_json::Value = serde_json::from_str(&nd).unwrap();
+        assert_eq!(v["app"], "a");
+        assert_eq!(v["total"], 15); // número crudo, no "15 B"
+        assert!(v.get("rx").is_none()); // rx no pedido
+    }
+
+    /// Regresión: `TotalRow` se proyecta por su nombre de cabecera real
+    /// ("interfaz"), no "iface". Cubre la ruta json/ndjson de `now`/`total`,
+    /// que antes dropeaba la interfaz en silencio con `--fields interfaz`.
+    #[test]
+    fn emitir_fields_totalrow_usa_nombre_de_cabecera() {
+        use caudalghost_core::proto::TotalRow;
+        assert!(TotalRow::cabecera().contains(&"interfaz"));
+        let filas = vec![TotalRow {
+            iface: "eth0".into(),
+            rx: 100,
+            tx: 20,
+        }];
+        let cols = vec!["interfaz".to_string(), "total".to_string()];
+        let nd = super::emitir(
+            &filas,
+            Formato::Ndjson,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            Some(&cols),
+        );
+        let v: serde_json::Value = serde_json::from_str(&nd).unwrap();
+        assert_eq!(v["interfaz"], "eth0", "la interfaz no debe dropearse: {nd}");
+        assert_eq!(v["total"], 120);
     }
 }

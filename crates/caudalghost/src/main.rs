@@ -2,7 +2,7 @@ mod client;
 mod live;
 mod render;
 
-use caudalghost_core::proto::{Request, Response};
+use caudalghost_core::proto::{Bucket, Request, Response};
 use caudalghost_core::range;
 use clap::{CommandFactory, Parser, Subcommand};
 use render::Formato;
@@ -47,6 +47,15 @@ struct OpcionesSalida {
     /// Desactiva color (también respeta NO_COLOR)
     #[arg(long)]
     no_color: bool,
+    /// Proyección de columnas para csv/json/ndjson (coma-separadas). Válidas: las de la cabecera del comando.
+    #[arg(long, value_name = "a,b,c", value_delimiter = ',')]
+    fields: Vec<String>,
+    /// Refresca la salida cada `--interval` s hasta Ctrl-C (solo -o table).
+    #[arg(long)]
+    watch: bool,
+    /// Segundos entre refrescos con --watch.
+    #[arg(long, value_name = "SECS", default_value_t = 2)]
+    interval: u64,
 }
 
 impl OpcionesSalida {
@@ -78,6 +87,7 @@ impl Cli {
             Cmd::Total { salida, .. } => Some(salida),
             Cmd::Top { salida, .. } => Some(salida),
             Cmd::Hosts { salida, .. } => Some(salida),
+            Cmd::Serie { salida, .. } => Some(salida),
             Cmd::Live { .. } | Cmd::Completions { .. } | Cmd::Man => None,
         }
     }
@@ -202,6 +212,24 @@ fn clasifica_error_conexion(e: anyhow::Error) -> SalidaError {
     }
 }
 
+/// Cubo temporal para `serie`, expuesto en la CLI (`--bucket`). Espejo de
+/// `proto::Bucket` para NO exponer el tipo del protocolo en la superficie clap.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum BucketArg {
+    Minute,
+    Hour,
+    Day,
+}
+impl From<BucketArg> for Bucket {
+    fn from(b: BucketArg) -> Self {
+        match b {
+            BucketArg::Minute => Bucket::Minute,
+            BucketArg::Hour => Bucket::Hour,
+            BucketArg::Day => Bucket::Day,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Verifica conexión con el daemon
@@ -266,6 +294,17 @@ enum Cmd {
         #[command(flatten)]
         salida: OpcionesSalida,
     },
+    /// Serie temporal del caudal total por rango (sparkline + tabla)
+    Serie {
+        /// Rango histórico. Tokens válidos (ver más abajo).
+        #[arg(value_name = "RANGO", long_help = ayuda_rango())]
+        rango: String,
+        /// Granularidad del cubo; por defecto se elige según el rango
+        #[arg(long, value_enum)]
+        bucket: Option<BucketArg>,
+        #[command(flatten)]
+        salida: OpcionesSalida,
+    },
     /// Dashboard interactivo en vivo (TUI pantalla completa)
     Live {
         /// Ventana de historia del gráfico en segundos
@@ -289,9 +328,54 @@ enum Cmd {
     Man,
 }
 
+/// Secuencia ANSI para limpiar pantalla y volver al origen (usada por --watch).
+const LIMPIAR_PANTALLA: &str = "\x1b[2J\x1b[H";
+
+/// `--watch` solo tiene sentido en `-o table`; en máquina, error claro (exit 1).
+fn validar_watch(fmt: Formato, watch: bool) -> Result<(), SalidaError> {
+    if watch && fmt != Formato::Table {
+        return Err(SalidaError::Otro(
+            "--watch solo aplica a -o table (para máquina usa un bucle de shell)".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Intervalo efectivo del refresco: mínimo 1 s (evita busy-loop con 0).
+fn intervalo_efectivo(interval: u64) -> u64 {
+    interval.max(1)
+}
+
+/// Ejecuta el comando en bucle hasta Ctrl-C. Corta en el PRIMER error
+/// (predecible: sale con su exit code). El primer render va SIN limpiar la
+/// pantalla, para que un error inmediato (uso, rango, daemon caído) se muestre
+/// sin borrar lo que el usuario tenía en la terminal; los refrescos siguientes
+/// sí limpian antes de repintar.
+fn ejecutar_en_bucle(cli: &Cli) -> Result<(), SalidaError> {
+    use std::io::Write;
+    let salida = cli
+        .salida()
+        .expect("--watch solo en subcomandos con OpcionesSalida");
+    validar_watch(cli.formato(), true)?;
+    let secs = intervalo_efectivo(salida.interval);
+    run(cli)?;
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        print!("{LIMPIAR_PANTALLA}");
+        let _ = std::io::stdout().flush();
+        run(cli)?;
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    if let Err(e) = run(&cli) {
+    let watch = cli.salida().map(|s| s.watch).unwrap_or(false);
+    let resultado = if watch {
+        ejecutar_en_bucle(&cli)
+    } else {
+        run(&cli)
+    };
+    if let Err(e) = resultado {
         if cli.formato() == Formato::Json {
             eprintln!("{}", e.a_json());
         } else {
@@ -364,6 +448,36 @@ fn rechaza_si_error(resp: &Response) -> Result<(), SalidaError> {
     }
 }
 
+/// Valida los nombres de `--fields` contra las columnas válidas del comando.
+fn validar_fields(pedidos: &[String], validos: &[&str]) -> Result<(), SalidaError> {
+    for f in pedidos {
+        if !validos.iter().any(|v| v == f) {
+            return Err(SalidaError::Otro(format!(
+                "campo desconocido '{f}'; válidos: {}",
+                validos.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Devuelve las columnas `--fields` a proyectar (o `None`), validando que el
+/// formato sea máquina (csv/json/ndjson) y que los nombres existan en `T`.
+fn fields_para<T: render::Tabulable>(
+    salida: &OpcionesSalida,
+) -> Result<Option<Vec<String>>, SalidaError> {
+    if salida.fields.is_empty() {
+        return Ok(None);
+    }
+    if salida.formato() == Formato::Table {
+        return Err(SalidaError::Otro(
+            "--fields aplica a csv/json/ndjson (no a table)".into(),
+        ));
+    }
+    validar_fields(&salida.fields, &T::cabecera())?;
+    Ok(Some(salida.fields.clone()))
+}
+
 /// Imprime la salida de `render::emitir` seguida de su salto de línea final
 /// — pero solo si `s` no está vacío. `emitir` devuelve `""` en `-o csv`/`-o
 /// ndjson` cuando no hay filas (ndjson: `join("\n")` de un iterador vacío);
@@ -382,7 +496,10 @@ fn imprimir(s: &str) {
 fn run(cli: &Cli) -> Result<(), SalidaError> {
     let socket = resolver_socket(cli.socket.clone(), std::env::var("CAUDALGHOST_SOCKET").ok());
     match &cli.cmd {
-        Cmd::Ping { .. } => {
+        Cmd::Ping { salida } => {
+            if !salida.fields.is_empty() {
+                return Err(SalidaError::Otro("--fields no aplica a ping".into()));
+            }
             let resp = llamar(&socket, &Request::Ping)?;
             if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
                 return Err(SalidaError::Otro(
@@ -405,7 +522,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             }
             Ok(())
         }
-        Cmd::Now { seconds, all, .. } => {
+        Cmd::Now {
+            seconds,
+            all,
+            salida,
+        } => {
+            let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let resp = llamar(&socket, &Request::Snapshot { seconds: *seconds })?;
             rechaza_si_error(&resp)?;
             if let Response::Snapshot { samples } = &resp {
@@ -433,12 +555,14 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         cli.color(),
                         "⏱ now",
                         None,
+                        fields.as_deref(),
                     ));
                 }
             }
             Ok(())
         }
-        Cmd::Total { rango, all, .. } => {
+        Cmd::Total { rango, all, salida } => {
+            let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -462,11 +586,18 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     cli.color(),
                     &format!("Σ rango: {rango}"),
                     None,
+                    fields.as_deref(),
                 ));
             }
             Ok(())
         }
-        Cmd::Top { seconds, limit, .. } => {
+        Cmd::Top {
+            seconds,
+            limit,
+            salida,
+            ..
+        } => {
+            let fields = fields_para::<caudalghost_core::proto::AppRow>(salida)?;
             let rango = rango_de_top(cli);
             match (rango, seconds) {
                 (Some(rango), None) => {
@@ -490,6 +621,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             cli.color(),
                             &format!("⛰ top apps · rango: {rango}"),
                             *limit,
+                            fields.as_deref(),
                         ));
                     }
                     Ok(())
@@ -513,6 +645,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             cli.color(),
                             &format!("⛰ top apps · {etiqueta}"),
                             *limit,
+                            fields.as_deref(),
                         ));
                     }
                     Ok(())
@@ -521,8 +654,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             }
         }
         Cmd::Hosts {
-            rango, app, limit, ..
+            rango,
+            app,
+            limit,
+            salida,
         } => {
+            let fields = fields_para::<caudalghost_core::proto::RemoteRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -554,7 +691,80 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     cli.color(),
                     &etiqueta,
                     *limit,
+                    fields.as_deref(),
                 ));
+            }
+            Ok(())
+        }
+        Cmd::Serie {
+            rango,
+            bucket,
+            salida,
+        } => {
+            let fields = fields_para::<render::SerieRow>(salida)?;
+            let w = resolver_rango(rango)?;
+            let bucket = bucket.map(Bucket::from).unwrap_or_else(|| {
+                range::pick_bucket(w.start, w.end, chrono::Local::now().timestamp())
+            });
+            let resp = llamar(
+                &socket,
+                &Request::Series {
+                    start: w.start,
+                    end: w.end,
+                    bucket,
+                },
+            )?;
+            rechaza_si_error(&resp)?;
+            if let Response::Series { points } = &resp {
+                let rows: Vec<render::SerieRow> = points
+                    .iter()
+                    .map(|p| render::SerieRow::desde(p, bucket))
+                    .collect();
+                let label = match bucket {
+                    Bucket::Minute => "minuto",
+                    Bucket::Hour => "hora",
+                    Bucket::Day => "día",
+                };
+                let titulo_txt = format!("📈 serie · rango: {rango} · cubo: {label}");
+                if cli.formato() == Formato::Table {
+                    if rows.is_empty() {
+                        if !cli.quiet() {
+                            println!("{}", aviso_sin_datos_rango(rango));
+                        }
+                        return Ok(());
+                    }
+                    if !cli.quiet() {
+                        if cli.color() {
+                            println!("{}", render::titulo(&titulo_txt));
+                        } else {
+                            println!("{titulo_txt}");
+                        }
+                        let totales: Vec<u64> = rows.iter().map(|r| r.rx + r.tx).collect();
+                        println!("{}", render::sparkline(&totales));
+                    }
+                    // quiet=true: el título/sparkline ya se imprimieron arriba; emitir solo pinta el cuerpo + Σ.
+                    imprimir(&render::emitir(
+                        &rows,
+                        Formato::Table,
+                        cli.units(),
+                        true,
+                        cli.color(),
+                        "",
+                        None,
+                        None,
+                    ));
+                } else {
+                    imprimir(&render::emitir(
+                        &rows,
+                        cli.formato(),
+                        cli.units(),
+                        cli.quiet(),
+                        cli.color(),
+                        &titulo_txt,
+                        None,
+                        fields.as_deref(),
+                    ));
+                }
             }
             Ok(())
         }
@@ -627,6 +837,11 @@ fn ping_json(version: &str, ebpf: bool) -> String {
 /// que el usuario vea una tabla vacía sin contexto de qué se filtró.
 fn aviso_sin_datos_app(app: &str, rango: &str) -> String {
     format!("sin datos para la app '{app}' en el rango {rango}")
+}
+
+/// Aviso cuando `serie <rango>` no devuelve puntos (evita una tabla vacía sin contexto).
+fn aviso_sin_datos_rango(rango: &str) -> String {
+    format!("sin datos en el rango {rango}")
 }
 
 /// Colapsa los AppDelta de una ventana de samples, ordenados por total desc.
@@ -975,6 +1190,7 @@ mod tests {
             false,
             "now",
             None,
+            None,
         );
         assert!(j.contains("\"schema\""));
     }
@@ -1026,5 +1242,128 @@ mod tests {
         let mut total = cmd.find_subcommand_mut("total").unwrap().clone();
         let help = total.render_help().to_string();
         assert!(help.contains("--output") && help.contains("--units"));
+    }
+
+    #[test]
+    fn serie_ndjson_una_linea_por_punto() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("fake.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut s = stream;
+            s.write_all(b"{\"type\":\"series\",\"points\":[{\"ts\":0,\"rx\":10,\"tx\":1},{\"ts\":3600,\"rx\":20,\"tx\":2}]}\n").unwrap();
+        });
+        let cli = Cli::try_parse_from([
+            "caudalghost",
+            "--socket",
+            sock.to_str().unwrap(),
+            "serie",
+            "hoy",
+            "-o",
+            "ndjson",
+        ])
+        .unwrap();
+        run(&cli).expect("serie ndjson no debe fallar");
+    }
+
+    #[test]
+    fn serie_rango_invalido_exit_5() {
+        let cli = Cli::try_parse_from(["caudalghost", "serie", "no-es-rango"]).unwrap();
+        let err = run(&cli).expect_err("rango inválido");
+        assert_eq!(err.exit_code(), 5);
+    }
+
+    #[test]
+    fn serie_acepta_bucket_explicito_y_hereda_salida() {
+        let ok =
+            Cli::try_parse_from(["caudalghost", "serie", "7d", "--bucket", "day", "-o", "csv"]);
+        assert!(ok.is_ok());
+        let malo = Cli::try_parse_from(["caudalghost", "serie", "7d", "--bucket", "siglo"]);
+        assert!(malo.is_err());
+    }
+
+    #[test]
+    fn aviso_sin_datos_rango_menciona_el_rango() {
+        assert!(super::aviso_sin_datos_rango("7d").contains("7d"));
+    }
+
+    #[test]
+    fn top_csv_fields_proyecta() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("f.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut l = String::new();
+            reader.read_line(&mut l).unwrap();
+            let mut s = stream;
+            s.write_all(b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"firefox\",\"rx\":100,\"tx\":20}]}\n")
+                .unwrap();
+        });
+        let cli = Cli::try_parse_from([
+            "caudalghost",
+            "--socket",
+            sock.to_str().unwrap(),
+            "top",
+            "hoy",
+            "-o",
+            "csv",
+            "--fields",
+            "app,total",
+        ])
+        .unwrap();
+        run(&cli).expect("top csv fields");
+    }
+
+    #[test]
+    fn fields_invalido_es_error() {
+        let cli =
+            Cli::try_parse_from(["caudalghost", "top", "hoy", "-o", "csv", "--fields", "nope"])
+                .unwrap();
+        let salida = cli.salida().unwrap();
+        let r = fields_para::<caudalghost_core::proto::AppRow>(salida);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn fields_en_table_es_error() {
+        let cli = Cli::try_parse_from(["caudalghost", "top", "hoy", "--fields", "app"]).unwrap();
+        let salida = cli.salida().unwrap();
+        assert!(fields_para::<caudalghost_core::proto::AppRow>(salida).is_err());
+    }
+
+    #[test]
+    fn validar_watch_solo_table() {
+        assert!(super::validar_watch(Formato::Table, true).is_ok());
+        let e = super::validar_watch(Formato::Json, true).unwrap_err();
+        assert_eq!(e.exit_code(), 1);
+        assert!(super::validar_watch(Formato::Csv, true).is_err());
+        assert!(super::validar_watch(Formato::Json, false).is_ok()); // sin watch, no valida
+    }
+
+    #[test]
+    fn intervalo_efectivo_minimo_uno() {
+        assert_eq!(super::intervalo_efectivo(0), 1);
+        assert_eq!(super::intervalo_efectivo(5), 5);
+    }
+
+    #[test]
+    fn watch_parsea_en_datos_no_en_live() {
+        assert!(
+            Cli::try_parse_from(["caudalghost", "total", "hoy", "--watch", "--interval", "5"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["caudalghost", "serie", "hoy", "--watch"]).is_ok());
+        assert!(Cli::try_parse_from(["caudalghost", "live", "--watch"]).is_err());
+        // live no lleva OpcionesSalida
     }
 }
