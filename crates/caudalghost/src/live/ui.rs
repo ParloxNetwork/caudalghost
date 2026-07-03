@@ -105,6 +105,7 @@ fn etiqueta_modo(mode: Mode, focus: Focus) -> String {
         Mode::Filtro => "[FILTRO]".to_string(),
         Mode::PausaScrub => "[PAUSA+SCRUB]".to_string(),
         Mode::Ayuda => "[AYUDA]".to_string(),
+        Mode::Drilldown => "[HOSTS]".to_string(),
     }
 }
 
@@ -133,6 +134,9 @@ fn segmentos_pie(mode: Mode, focus: Focus) -> Vec<String> {
         Mode::Normal => {
             segs.push("Tab foco".to_string());
             segs.push("Enter zoom".to_string());
+        }
+        Mode::Drilldown => {
+            segs.push("Esc/← volver".to_string());
         }
     }
     segs.push("p pausa · a incluir lo · u unidades".to_string());
@@ -635,6 +639,14 @@ pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         frame.render_widget(aviso, area);
         return;
     }
+    if let Some(d) = &model.drill {
+        if model.mode == Mode::Drilldown && d.desde == Focus::AppsVivo {
+            let items = model.hosts_de_app(&d.app);
+            let titulo = titulo_panel(&format!("hosts de {}", d.app), "ahora", None);
+            draw_hist_panel(frame, area, &titulo, "host", &items, model.units, None);
+            return;
+        }
+    }
     let apps: Vec<(String, u64, u64)> = model
         .top_apps()
         .into_iter()
@@ -866,13 +878,34 @@ fn draw_hist_panel(
     frame.render_widget(table, partes[1]);
 }
 
+/// Rango histórico activo, como texto para `titulo_panel`, o `None` si es "todo"
+/// (el caso por defecto no necesita recordatorio en el título).
+fn rango_titulo(model: &LiveModel) -> Option<&'static str> {
+    let tok = crate::live::state::RANGOS[model.hist_range_idx];
+    (tok != "todo").then_some(tok)
+}
+
+/// Compone el `extra` de `titulo_panel` combinando la selección (`sel N/M`) con el
+/// rango histórico activo cuando ambos aplican.
+fn extra_con_rango(seleccion: Option<String>, rango: Option<&str>) -> Option<String> {
+    match (seleccion, rango) {
+        (Some(s), Some(r)) => Some(format!("{s} · {r}")),
+        (Some(s), None) => Some(s),
+        (None, Some(r)) => Some(r.to_string()),
+        (None, None) => None,
+    }
+}
+
 /// Panel de histórico de apps: totales acumulados, orden desc. Aviso si eBPF inactivo.
+/// Si hay un drill activo desde este panel (`Mode::Drilldown`), dibuja en su lugar la
+/// sub-vista de hosts remotos de la app seleccionada (reutiliza `draw_hist_panel`).
 pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
+    let rango = rango_titulo(model);
     if !model.ebpf {
         let block =
             Block::default()
                 .borders(Borders::ALL)
-                .title(titulo_panel("apps", "histórico", None));
+                .title(titulo_panel("apps", "histórico", rango));
         let aviso = Paragraph::new(Line::from(Span::styled(
             "eBPF inactivo — corre el daemon con sudo para ver apps",
             Style::default().fg(Color::Yellow),
@@ -882,16 +915,33 @@ pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         frame.render_widget(aviso, area);
         return;
     }
+    if let Some(d) = &model.drill {
+        if model.mode == Mode::Drilldown && d.desde == Focus::AppsHist {
+            let items: Vec<(String, u64, u64)> = model
+                .drill_hosts
+                .iter()
+                .map(|r| (r.host.clone(), r.rx, r.tx))
+                .collect();
+            let titulo = titulo_panel(&format!("hosts de {}", d.app), "histórico", rango);
+            draw_hist_panel(frame, area, &titulo, "host", &items, model.units, None);
+            return;
+        }
+    }
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::AppsHist;
     let mut items: Vec<(String, u64, u64)> = model
         .hist_apps
         .iter()
         .map(|r| (r.app.clone(), r.rx, r.tx))
+        .filter(|(app, _, _)| {
+            !filtro_activo || crate::live::state::nombre_coincide(app, &model.filtro)
+        })
         .collect();
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
     let enfocado = model.focus == Focus::AppsHist;
     let seleccionado = enfocado.then_some(model.selected_row);
-    let extra = (enfocado && !items.is_empty())
+    let seleccion = (enfocado && !items.is_empty())
         .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
+    let extra = extra_con_rango(seleccion, rango);
     let titulo = titulo_panel("apps", "histórico", extra.as_deref());
     draw_hist_panel(
         frame,
@@ -915,8 +965,9 @@ pub fn draw_hist_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
     let enfocado = model.focus == Focus::IfacesHist;
     let seleccionado = enfocado.then_some(model.selected_row);
-    let extra = (enfocado && !items.is_empty())
+    let seleccion = (enfocado && !items.is_empty())
         .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
+    let extra = extra_con_rango(seleccion, rango_titulo(model));
     let titulo = titulo_panel("interfaces", "histórico", extra.as_deref());
     draw_hist_panel(
         frame,
@@ -1724,6 +1775,92 @@ mod tests {
     }
 
     #[test]
+    fn hist_titulo_muestra_rango_cuando_no_es_todo() {
+        use caudalghost_core::proto::TotalRow;
+        let mut m = LiveModel {
+            hist_ifaces: vec![TotalRow {
+                iface: "eth0".into(),
+                rx: 10,
+                tx: 1,
+            }],
+            ..Default::default()
+        };
+        m.hist_range_idx = 3; // "7d"
+        let s = render_area(&m, 60, 12, draw_hist_ifaces);
+        assert!(
+            s.contains("7d"),
+            "el título del histórico debe mostrar el rango: {s:?}"
+        );
+    }
+
+    #[test]
+    fn hist_apps_drill_muestra_hosts() {
+        use crate::live::state::{Drill, Focus, Mode};
+        use caudalghost_core::proto::{AppRow, RemoteRow};
+        let m = LiveModel {
+            ebpf: true,
+            focus: Focus::AppsHist,
+            mode: Mode::Drilldown,
+            drill: Some(Drill {
+                app: "firefox".into(),
+                desde: Focus::AppsHist,
+            }),
+            drill_hosts: vec![RemoteRow {
+                host: "github.com".into(),
+                rx: 100,
+                tx: 1,
+            }],
+            hist_apps: vec![AppRow {
+                app: "firefox".into(),
+                rx: 100,
+                tx: 1,
+            }],
+            ..Default::default()
+        };
+        let s = render_area(&m, 60, 12, draw_hist_apps);
+        assert!(
+            s.contains("github.com"),
+            "drill histórico muestra los hosts: {s:?}"
+        );
+        assert!(
+            s.to_lowercase().contains("firefox"),
+            "título con la app: {s:?}"
+        );
+    }
+
+    #[test]
+    fn apps_vivo_drill_muestra_hosts_de_la_app() {
+        use crate::live::state::{Drill, Focus, Mode};
+        use caudalghost_core::types::{AppRemoteDelta, Sample};
+        let m = LiveModel {
+            ebpf: true,
+            focus: Focus::AppsVivo,
+            mode: Mode::Drilldown,
+            drill: Some(Drill {
+                app: "firefox".into(),
+                desde: Focus::AppsVivo,
+            }),
+            samples: vec![Sample {
+                ts: 0,
+                deltas: vec![],
+                apps: vec![],
+                flows: vec![AppRemoteDelta {
+                    app: "firefox".into(),
+                    host: "scdn.co".into(),
+                    rx: 50,
+                    tx: 5,
+                }],
+            }],
+            ..Default::default()
+        };
+        let s = render_area(&m, 50, 12, draw_apps);
+        assert!(
+            s.contains("scdn.co"),
+            "drill en vivo muestra los hosts de la app: {s:?}"
+        );
+    }
+
+    #[test]
     fn hist_ifaces_titulo_muestra_seleccion_via_titulo_panel_cuando_enfocado() {
         use crate::live::state::Focus;
         use caudalghost_core::proto::TotalRow;
@@ -2351,5 +2488,38 @@ mod tests {
             s.contains("2026"),
             "debe incluir el año en ancho holgado: {s:?}"
         );
+    }
+
+    #[test]
+    fn keymap_incluye_drill_y_rango() {
+        let k = crate::live::state::keymap_activo();
+        assert!(
+            k.iter().any(|(t, _)| t.contains('→') || t.contains('l')),
+            "drill en el keymap: {k:?}"
+        );
+        assert!(
+            k.iter().any(|(t, _)| t.contains('r')),
+            "rango en el keymap: {k:?}"
+        );
+    }
+
+    #[test]
+    fn drill_no_rompe_draw_completo() {
+        let mut m = LiveModel {
+            version: "0.6.3".into(),
+            ebpf: true,
+            connected: true,
+            ..Default::default()
+        };
+        m.samples = vec![
+            crate::live::state::tests_support::sample(0, &[("eth0", 1024, 512)]),
+            crate::live::state::tests_support::sample_apps(1, &[("firefox", 2048, 256)]),
+        ];
+        let backend = ratatui::backend::TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &m)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(s.contains("CaudalGhost") && s.contains("ahora") && s.contains("salir"));
     }
 }
