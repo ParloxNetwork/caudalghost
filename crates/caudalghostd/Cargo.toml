@@ -55,6 +55,11 @@ assets = [
     ["../../crates/caudalghost-gui/src-tauri/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/caudalghost-gui.png", "644"],
     ["../../crates/caudalghost-gui/src-tauri/icons/128x128@2x.png", "usr/share/icons/hicolor/256x256/apps/caudalghost-gui.png", "644"],
     ["../../dist/metainfo/net.parlox.caudalghost.metainfo.xml", "usr/share/metainfo/", "644"],
+    # Completions + man de la CLI, generados por build-debs.sh antes de empaquetar.
+    ["../../target/completions/caudalghost.bash", "usr/share/bash-completion/completions/caudalghost", "644"],
+    ["../../target/completions/_caudalghost", "usr/share/zsh/site-functions/", "644"],
+    ["../../target/completions/caudalghost.fish", "usr/share/fish/vendor_completions.d/", "644"],
+    ["../../target/man/caudalghost.1.gz", "usr/share/man/man1/", "644"],
 ]
 maintainer-scripts = "debian/"
 
@@ -91,4 +96,9 @@ assets = [
     # Drop-in SOLO de la edición servidor: acceso al socket restringido al grupo
     # por defecto (H-1). El escritorio NO lo lleva → conserva el acceso por-UID.
     ["../../dist/systemd/server-acl-off.conf", "usr/lib/systemd/system/caudalghostd.service.d/10-acl-off.conf", "644"],
+    # Completions + man de la CLI (idéntico al de escritorio: la CLI es la misma).
+    ["../../target/completions/caudalghost.bash", "usr/share/bash-completion/completions/caudalghost", "644"],
+    ["../../target/completions/_caudalghost", "usr/share/zsh/site-functions/", "644"],
+    ["../../target/completions/caudalghost.fish", "usr/share/fish/vendor_completions.d/", "644"],
+    ["../../target/man/caudalghost.1.gz", "usr/share/man/man1/", "644"],
 ]

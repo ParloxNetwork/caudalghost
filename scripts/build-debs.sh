@@ -27,6 +27,16 @@ build_binaries() {
     cargo build --release -p caudalghostd -p caudalghost
 }
 
+build_completions_man() {
+    echo "==> Generando completions de shell + man page"
+    local bin="target/release/caudalghost"
+    mkdir -p target/completions target/man
+    "$bin" completions bash > target/completions/caudalghost.bash
+    "$bin" completions zsh   > target/completions/_caudalghost
+    "$bin" completions fish  > target/completions/caudalghost.fish
+    "$bin" man | gzip -9 -n > target/man/caudalghost.1.gz
+}
+
 build_gui() {
     echo "==> Compilando GUI (Tauri, --no-bundle)"
     ( cd crates/caudalghost-gui && cargo tauri build --no-bundle )
@@ -43,9 +53,9 @@ build_server_deb() {
 }
 
 case "$target" in
-    both)    build_binaries; build_gui; build_desktop_deb; build_server_deb ;;
-    desktop) build_binaries; build_gui; build_desktop_deb ;;
-    server)  build_binaries; build_server_deb ;;
+    both)    build_binaries; build_completions_man; build_gui; build_desktop_deb; build_server_deb ;;
+    desktop) build_binaries; build_completions_man; build_gui; build_desktop_deb ;;
+    server)  build_binaries; build_completions_man; build_server_deb ;;
     *)       echo "uso: $0 [both|desktop|server]" >&2; exit 2 ;;
 esac
 
