@@ -2,6 +2,21 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.1] — 2026-07-02
+
+### TUI (`caudalghost live`)
+
+Ejes del gráfico de caudal y pico localizable (conserva el `Sparkline`; cliente-only).
+
+- **Eje X de tiempo:** fila inferior con marcas relativas alineadas a las columnas (borde derecho =
+  `ahora`, hacia la izquierda `12s`, `24s`, … según el ancho y `--window`).
+- **Eje Y mínimo:** canalón izquierdo con el **máximo realmente dibujado** arriba y `0 B` abajo, para
+  leer la magnitud de una barra de un vistazo.
+- **Pico localizable:** el título pasa a `(pico X/s · hace Nmin)` — el pico de la ventana (10 min) ahora
+  dice **cuándo** ocurrió; si cae dentro de la franja visible, se marca su columna con un `▲`.
+- **Responsivo:** el canalón Y se omite en terminales estrechas y el eje X en terminales muy bajas,
+  degradando al gráfico sin ejes sin romper el layout.
+
 ## [0.6.0] — 2026-07-02
 
 ### TUI (`caudalghost live`)
