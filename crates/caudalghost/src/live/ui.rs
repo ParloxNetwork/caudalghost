@@ -160,12 +160,14 @@ fn segmentos_pie(mode: Mode, focus: Focus) -> Vec<String> {
 }
 
 /// Mapea el `Nivel` lógico (frescura del dato, resaltado por umbral) al color de
-/// terminal que lo representa. Verde=Green, Ambar=Yellow, Rojo=Red.
+/// terminal que lo representa. Verde=Green, Ambar=Yellow. El nivel "alto" NO usa rojo
+/// (poco legible como texto y demasiado alarmista): un naranja cálido truecolor que
+/// destaca sin gritar. El estado de error real (desconectado) sí sigue en rojo aparte.
 fn color_nivel(n: Nivel) -> Color {
     match n {
         Nivel::Verde => Color::Green,
         Nivel::Ambar => Color::Yellow,
-        Nivel::Rojo => Color::Red,
+        Nivel::Rojo => Color::Rgb(0xF2, 0x8C, 0x28),
     }
 }
 
@@ -702,8 +704,12 @@ pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
                 barra,
             ]);
             let serie = serie_app(model, app);
-            let actual = serie.last().copied().unwrap_or(0);
-            let nivel = crate::live::state::nivel_umbral(&serie, actual);
+            let suave = crate::live::state::serie_suavizada(
+                &serie,
+                crate::live::state::SUAVIZADO_UMBRAL_SECS,
+            );
+            let actual = suave.last().copied().unwrap_or(0);
+            let nivel = crate::live::state::nivel_umbral(&suave, actual);
             let mut row_style = if i == 0 {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
@@ -1081,8 +1087,10 @@ pub fn draw_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
             break;
         }
         let spark = crate::render::sparkline(&fit_series(serie, 8));
-        let actual = serie.last().copied().unwrap_or(0);
-        let nivel = crate::live::state::nivel_umbral(serie, actual);
+        let suave =
+            crate::live::state::serie_suavizada(serie, crate::live::state::SUAVIZADO_UMBRAL_SECS);
+        let actual = suave.last().copied().unwrap_or(0);
+        let nivel = crate::live::state::nivel_umbral(&suave, actual);
         let mut row_style = if row_idx == 0 {
             Style::default().add_modifier(Modifier::BOLD)
         } else {
