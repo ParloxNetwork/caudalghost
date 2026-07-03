@@ -12,6 +12,13 @@ pub struct Window {
 // Nota: "ayer"/"dia:" asumen días de 86 400 s; en cambios DST el corte se desvía ±1 h. Aceptado en F1.
 // Si la medianoche local no existe (gap de spring-forward), local_midnight propaga Err en lugar de fabricar un valor.
 
+/// Lista canónica de tokens de rango válidos, en español, para reutilizar en
+/// el `--help` de la CLI y en el mensaje de error de `resolve`.
+pub fn tokens_ayuda() -> &'static str {
+    "5m, 1h, 24h, 7d, 30d, 90d, 365d, hoy, ayer, este-mes, este-anio, \
+     dia:YYYY-MM-DD, rango:YYYY-MM-DD:YYYY-MM-DD"
+}
+
 /// Tokens: 5m, 1h, 24h, 7d, 30d, 90d, 365d, hoy, ayer, este-mes, este-anio, dia:YYYY-MM-DD, rango:YYYY-MM-DD:YYYY-MM-DD
 pub fn resolve(token: &str, now: DateTime<Local>) -> Result<Window, String> {
     let end = now.timestamp();
@@ -74,7 +81,12 @@ pub fn resolve(token: &str, now: DateTime<Local>) -> Result<Window, String> {
                 end: local_midnight(d2)? + 86_400,
             }
         }
-        _ => return Err(format!("rango desconocido: '{token}'")),
+        _ => {
+            return Err(format!(
+                "rango desconocido: '{token}'. Válidos: {}",
+                tokens_ayuda()
+            ));
+        }
     };
     Ok(w)
 }
@@ -306,5 +318,17 @@ mod tests {
             crate::range::pick_bucket(start, start + 3_600, now),
             Bucket::Day
         );
+    }
+
+    #[test]
+    fn tokens_ayuda_lista_los_validos() {
+        let a = super::tokens_ayuda();
+        assert!(a.contains("hoy") && a.contains("dia:") && a.contains("rango:"));
+    }
+
+    #[test]
+    fn resolve_incluye_tokens_ayuda_en_el_mensaje_de_error() {
+        let err = resolve("banana", now()).unwrap_err();
+        assert!(err.contains("hoy") && err.contains("dia:"));
     }
 }

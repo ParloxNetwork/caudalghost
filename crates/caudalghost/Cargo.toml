@@ -9,6 +9,9 @@ caudalghost-core = { path = "../caudalghost-core" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
+clap_mangen.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 comfy-table.workspace = true
 owo-colors.workspace = true

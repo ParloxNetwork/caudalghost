@@ -2,6 +2,46 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.7.0] — 2026-07-03
+
+### CLI (comandos de un-disparo: `ping/now/total/top/hosts`)
+
+Arranca el arco **0.7.x = CLI**: la CLI de un-disparo se vuelve **profesional y scriptable** (cliente-only,
+sin cambios en el daemon ni el protocolo).
+
+- **Formatos de salida `-o/--output <table|json|csv|ndjson>`** (default `table`): CSV para hojas de
+  cálculo, NDJSON (una fila por línea, bytes crudos) para pipelines con `jq`. `--json` se conserva como
+  **alias** de `-o json`. La salida JSON tabular lleva `"schema": 1` como contrato estable.
+- **Códigos de salida diferenciados** (para cron/systemd/scripts):
+
+  | Código | Significado |
+  |---|---|
+  | `0` | OK |
+  | `2` | uso inválido de flags (lo emite clap) |
+  | `3` | daemon inalcanzable (socket ausente / sin permiso) |
+  | `4` | error de negocio (el daemon respondió `Error`) |
+  | `5` | rango/argumento inválido |
+  | `1` | fallback genérico |
+
+  Con `-o json`, los errores salen estructurados: `{"error":{"kind":"…","message":"…"}}`.
+- **Unidades `-u/--units <binary|decimal|bits>`** en las tablas (coherente con la tecla `u` de la TUI).
+- **Rango unificado en `top`:** acepta `<RANGO>` posicional como `total`/`hosts`; `--rango` se mantiene
+  como **forma equivalente** (retro-compatible con 0.6.x).
+- **`-n/--limit <N>`** en `top`/`hosts` para acotar filas; la fila **`Σ total` refleja el total real** de
+  todo el rango, no el de las N mostradas.
+- **Ayuda de tokens de rango** en el `--help` de `total`/`top`/`hosts` y en el mensaje de error al parsear.
+- **`--quiet`** (solo datos), **`--no-color`** (+ respeta `NO_COLOR`), **alineación numérica a la derecha**.
+- **`CAUDALGHOST_SOCKET`** como fallback de `--socket` (precedencia flag > env > default XDG).
+- **Empaquetado:** completions **bash/zsh/fish** (`clap_complete`) y **man page** (`clap_mangen`)
+  generadas desde la misma definición de la CLI y empaquetadas en **ambas** ediciones `.deb`.
+
+#### Comportamientos conocidos
+- **`--all` se retiró de `top`/`hosts`** (era un no-op: esas filas no tienen interfaz que filtrar); sigue
+  en `now`/`total`/`live`.
+- **`ping`/`now` soportan `table` y `json`** (no `csv`/`ndjson`, que devuelven error claro); su `-o json`
+  es el "sobre" crudo del `Response`, distinto del envoltorio `{"schema":1,…}` de `total/top/hosts`.
+  Unificarlos del todo queda para 0.7.1.
+
 ## [0.6.5] — 2026-07-03
 
 ### TUI (`caudalghost live`)
