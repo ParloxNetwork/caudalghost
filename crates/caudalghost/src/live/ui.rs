@@ -1,6 +1,6 @@
 //! Render puro del dashboard sobre un Frame de ratatui (testeable con TestBackend).
 
-use crate::live::state::{frescura, Focus, LiveModel, Mode, Nivel};
+use crate::live::state::{frescura, Focus, LiveModel, Mode, Nivel, Vista};
 use crate::render::format_units;
 use chrono::Datelike;
 use ratatui::layout::{Constraint, Rect};
@@ -9,9 +9,28 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Sparkline, Table, Wrap};
 use ratatui::Frame;
 
+/// Dibuja el panel de apps según la vista activa del modelo (`vista_apps`): el propio
+/// `draw_apps`/`draw_hist_apps` maneja su sub-vista de drill (guard por `drill.vista`).
+fn draw_apps_segun_vista(frame: &mut Frame, model: &LiveModel, area: Rect) {
+    match model.vista_apps {
+        Vista::Ahora => draw_apps(frame, model, area),
+        Vista::Historico => draw_hist_apps(frame, model, area),
+    }
+}
+
+/// Dibuja el panel de interfaces según la vista activa del modelo (`vista_ifaces`).
+fn draw_ifaces_segun_vista(frame: &mut Frame, model: &LiveModel, area: Rect) {
+    match model.vista_ifaces {
+        Vista::Ahora => draw_ifaces(frame, model, area),
+        Vista::Historico => draw_hist_ifaces(frame, model, area),
+    }
+}
+
 /// Dibuja el dashboard completo en 3 bandas:
-/// ① gráficos ↓/↑ lado a lado · ② apps/interfaces EN VIVO · ③ apps/interfaces HISTÓRICO.
-/// En terminales bajas (height < 30) se omite la banda histórico.
+/// ① gráficos ↓/↑ lado a lado · ② `apps | interfaces` (cada panel según su vista,
+/// ahora/histórico, alternable con `v`) · ③ servidores (top de todas las apps, ancho
+/// completo, también con su propia vista). En terminales bajas se omite primero la
+/// banda de servidores, y si sigue sin caber, se compacta a solo gráficos + ②.
 pub fn draw(frame: &mut Frame, model: &LiveModel) {
     use ratatui::layout::{Constraint, Direction, Layout};
     let area = frame.area();
@@ -28,30 +47,29 @@ pub fn draw(frame: &mut Frame, model: &LiveModel) {
         draw_header(frame, model, bandas[0]);
         match model.focus {
             Focus::Grafico => draw_charts(frame, model, bandas[1]),
-            Focus::AppsVivo => draw_apps(frame, model, bandas[1]),
-            Focus::IfacesVivo => draw_ifaces(frame, model, bandas[1]),
-            Focus::AppsHist => draw_hist_apps(frame, model, bandas[1]),
-            Focus::IfacesHist => draw_hist_ifaces(frame, model, bandas[1]),
+            Focus::Apps => draw_apps_segun_vista(frame, model, bandas[1]),
+            Focus::Interfaces => draw_ifaces_segun_vista(frame, model, bandas[1]),
+            Focus::Servidores => draw_servidores(frame, model, bandas[1]),
         }
         draw_footer(frame, model, bandas[2]);
         return;
     }
 
-    let con_historico = area.height >= 30;
+    let con_servidores = area.height >= 30;
 
-    let constraints = if con_historico {
+    let constraints = if con_servidores {
         vec![
             Constraint::Length(1),  // cabecera
             Constraint::Min(8),     // ① gráficos
-            Constraint::Length(11), // ② vivo
-            Constraint::Length(11), // ③ histórico
+            Constraint::Length(11), // ② apps | interfaces
+            Constraint::Length(11), // ③ servidores
             Constraint::Length(1),  // pie
         ]
     } else {
         vec![
             Constraint::Length(1),  // cabecera
             Constraint::Min(6),     // ① gráficos
-            Constraint::Length(11), // ② vivo
+            Constraint::Length(11), // ② apps | interfaces
             Constraint::Length(1),  // pie
         ]
     };
@@ -63,22 +81,17 @@ pub fn draw(frame: &mut Frame, model: &LiveModel) {
     draw_header(frame, model, bandas[0]);
     draw_charts(frame, model, bandas[1]);
 
-    // ② Banda VIVO: apps (izq 55%) | interfaces (der 45%)
-    let vivo = Layout::default()
+    // ② Banda apps (izq 55%) | interfaces (der 45%), cada uno según su vista.
+    let media = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(bandas[2]);
-    draw_apps(frame, model, vivo[0]);
-    draw_ifaces(frame, model, vivo[1]);
+    draw_apps_segun_vista(frame, model, media[0]);
+    draw_ifaces_segun_vista(frame, model, media[1]);
 
-    if con_historico {
-        // ③ Banda HISTÓRICO: apps (izq 55%) | interfaces (der 45%)
-        let hist = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(bandas[3]);
-        draw_hist_apps(frame, model, hist[0]);
-        draw_hist_ifaces(frame, model, hist[1]);
+    if con_servidores {
+        // ③ Banda servidores: ancho completo.
+        draw_servidores(frame, model, bandas[3]);
         draw_footer(frame, model, bandas[4]);
     } else {
         draw_footer(frame, model, bandas[3]);
@@ -97,8 +110,9 @@ fn etiqueta_modo(mode: Mode, focus: Focus) -> String {
         Mode::Zoom => {
             let panel = match focus {
                 Focus::Grafico => "grafico",
-                Focus::AppsVivo | Focus::AppsHist => "apps",
-                Focus::IfacesVivo | Focus::IfacesHist => "ifaces",
+                Focus::Apps => "apps",
+                Focus::Interfaces => "ifaces",
+                Focus::Servidores => "servidores",
             };
             format!("[ZOOM {panel}]")
         }
@@ -134,6 +148,7 @@ fn segmentos_pie(mode: Mode, focus: Focus) -> Vec<String> {
         Mode::Normal => {
             segs.push("Tab foco".to_string());
             segs.push("Enter zoom".to_string());
+            segs.push("v vista".to_string());
         }
         Mode::Drilldown => {
             segs.push("Esc/← volver".to_string());
@@ -625,7 +640,7 @@ fn serie_app(model: &LiveModel, nombre: &str) -> Vec<u64> {
 
 /// Panel de top apps con barras inline. Si eBPF inactivo, aviso honesto.
 pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
-    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::AppsVivo;
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::Apps;
     let extra = filtro_activo.then(|| format!("filtro: {}", model.filtro));
     let titulo = titulo_panel("top apps", "ahora", extra.as_deref());
     let block = Block::default().borders(Borders::ALL).title(titulo);
@@ -640,7 +655,7 @@ pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         return;
     }
     if let Some(d) = &model.drill {
-        if model.mode == Mode::Drilldown && d.desde == Focus::AppsVivo {
+        if model.mode == Mode::Drilldown && d.vista == Vista::Ahora {
             let items = model.hosts_de_app(&d.app);
             let titulo = titulo_panel(&format!("hosts de {}", d.app), "ahora", None);
             draw_hist_panel(frame, area, &titulo, "host", &items, model.units, None);
@@ -659,7 +674,7 @@ pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .len()
         .clamp(1, crate::live::state::PANEL_WINDOW_SECS) as u64;
     let max = apps.iter().map(|(_, rx, tx)| rx + tx).max().unwrap_or(0);
-    let enfocado = model.focus == Focus::AppsVivo;
+    let enfocado = model.focus == Focus::Apps;
     // Aviso de filas ocultas: si hay más apps que espacio visible, se reserva la
     // última fila visible para "+N más — Enter para expandir" (Task 11).
     // -2 por los bordes, -1 por la fila de encabezado ("app ↓ ↑").
@@ -896,6 +911,41 @@ fn extra_con_rango(seleccion: Option<String>, rango: Option<&str>) -> Option<Str
     }
 }
 
+/// Panel de servidores (top de todas las apps): Ahora=top_hosts_vivo / Historico=servidores_hist.
+/// Resalta `selected_row` cuando el panel tiene el foco de navegación.
+fn draw_servidores(frame: &mut Frame, model: &LiveModel, area: Rect) {
+    type Items = Vec<(String, u64, u64)>;
+    if !model.ebpf {
+        let block =
+            Block::default()
+                .borders(Borders::ALL)
+                .title(titulo_panel("servidores", "ahora", None));
+        let aviso = Paragraph::new(Line::from(Span::styled(
+            "eBPF inactivo — corre el daemon con sudo para ver servidores",
+            Style::default().fg(Color::Yellow),
+        )))
+        .wrap(Wrap { trim: true })
+        .block(block);
+        frame.render_widget(aviso, area);
+        return;
+    }
+    let (items, ambito, extra): (Items, &str, Option<String>) = match model.vista_servidores {
+        Vista::Ahora => (model.top_hosts_vivo(), "ahora", None),
+        Vista::Historico => {
+            let tok = crate::live::state::RANGOS[model.hist_range_idx];
+            let items = model
+                .servidores_hist
+                .iter()
+                .map(|r| (r.host.clone(), r.rx, r.tx))
+                .collect();
+            (items, "histórico", (tok != "todo").then(|| tok.to_string()))
+        }
+    };
+    let titulo = titulo_panel("servidores", ambito, extra.as_deref());
+    let sel = (model.focus == Focus::Servidores).then_some(model.selected_row);
+    draw_hist_panel(frame, area, &titulo, "host", &items, model.units, sel);
+}
+
 /// Panel de histórico de apps: totales acumulados, orden desc. Aviso si eBPF inactivo.
 /// Si hay un drill activo desde este panel (`Mode::Drilldown`), dibuja en su lugar la
 /// sub-vista de hosts remotos de la app seleccionada (reutiliza `draw_hist_panel`).
@@ -916,7 +966,7 @@ pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         return;
     }
     if let Some(d) = &model.drill {
-        if model.mode == Mode::Drilldown && d.desde == Focus::AppsHist {
+        if model.mode == Mode::Drilldown && d.vista == Vista::Historico {
             let items: Vec<(String, u64, u64)> = model
                 .drill_hosts
                 .iter()
@@ -927,7 +977,7 @@ pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
             return;
         }
     }
-    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::AppsHist;
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::Apps;
     let mut items: Vec<(String, u64, u64)> = model
         .hist_apps
         .iter()
@@ -937,7 +987,7 @@ pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         })
         .collect();
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
-    let enfocado = model.focus == Focus::AppsHist;
+    let enfocado = model.focus == Focus::Apps;
     let seleccionado = enfocado.then_some(model.selected_row);
     let seleccion = (enfocado && !items.is_empty())
         .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
@@ -963,7 +1013,7 @@ pub fn draw_hist_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .map(|r| (r.iface.clone(), r.rx, r.tx))
         .collect();
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
-    let enfocado = model.focus == Focus::IfacesHist;
+    let enfocado = model.focus == Focus::Interfaces;
     let seleccionado = enfocado.then_some(model.selected_row);
     let seleccion = (enfocado && !items.is_empty())
         .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
@@ -982,7 +1032,7 @@ pub fn draw_hist_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
 
 /// Panel de interfaces con tasas, sparkline y (si existe) IP en gris indentada.
 pub fn draw_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
-    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::IfacesVivo;
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::Interfaces;
     let extra = filtro_activo.then(|| format!("filtro: {}", model.filtro));
     let titulo = titulo_panel("interfaces", "ahora", extra.as_deref());
     let block = Block::default().borders(Borders::ALL).title(titulo);
@@ -992,7 +1042,7 @@ pub fn draw_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .clamp(1, crate::live::state::PANEL_WINDOW_SECS) as u64;
     let max_lines = area.height.saturating_sub(2) as usize; // dentro de los bordes
     let mut lines: Vec<Line> = Vec::new();
-    let enfocado = model.focus == Focus::IfacesVivo;
+    let enfocado = model.focus == Focus::Interfaces;
     let filas: Vec<_> = model
         .iface_rows()
         .into_iter()
@@ -1531,7 +1581,7 @@ mod tests {
         use crate::live::state::Focus;
         let mut m = LiveModel {
             ebpf: true,
-            focus: Focus::AppsVivo,
+            focus: Focus::Apps,
             filtro: "fire".into(),
             ..Default::default()
         };
@@ -1741,7 +1791,7 @@ mod tests {
         use caudalghost_core::proto::AppRow;
         let m = LiveModel {
             ebpf: true,
-            focus: Focus::AppsHist,
+            focus: Focus::Apps,
             selected_row: 1,
             hist_apps: vec![
                 AppRow {
@@ -1795,15 +1845,16 @@ mod tests {
 
     #[test]
     fn hist_apps_drill_muestra_hosts() {
-        use crate::live::state::{Drill, Focus, Mode};
+        use crate::live::state::{Drill, Focus, Mode, Vista};
         use caudalghost_core::proto::{AppRow, RemoteRow};
         let m = LiveModel {
             ebpf: true,
-            focus: Focus::AppsHist,
+            focus: Focus::Apps,
+            vista_apps: Vista::Historico,
             mode: Mode::Drilldown,
             drill: Some(Drill {
                 app: "firefox".into(),
-                desde: Focus::AppsHist,
+                vista: Vista::Historico,
             }),
             drill_hosts: vec![RemoteRow {
                 host: "github.com".into(),
@@ -1830,15 +1881,15 @@ mod tests {
 
     #[test]
     fn apps_vivo_drill_muestra_hosts_de_la_app() {
-        use crate::live::state::{Drill, Focus, Mode};
+        use crate::live::state::{Drill, Focus, Mode, Vista};
         use caudalghost_core::types::{AppRemoteDelta, Sample};
         let m = LiveModel {
             ebpf: true,
-            focus: Focus::AppsVivo,
+            focus: Focus::Apps,
             mode: Mode::Drilldown,
             drill: Some(Drill {
                 app: "firefox".into(),
-                desde: Focus::AppsVivo,
+                vista: Vista::Ahora,
             }),
             samples: vec![Sample {
                 ts: 0,
@@ -1866,7 +1917,7 @@ mod tests {
         use caudalghost_core::proto::TotalRow;
         let m = LiveModel {
             show_all: true,
-            focus: Focus::IfacesHist,
+            focus: Focus::Interfaces,
             selected_row: 0,
             hist_ifaces: vec![
                 TotalRow {
@@ -1957,11 +2008,13 @@ mod tests {
 
     #[test]
     fn draw_completo_tres_bandas() {
+        use crate::live::state::Vista;
         use caudalghost_core::proto::{AppRow, TotalRow};
         let mut m = LiveModel {
             version: "0.1.0".into(),
             ebpf: true,
             connected: true,
+            vista_apps: Vista::Historico,
             ..Default::default()
         };
         m.samples = vec![
@@ -1978,15 +2031,19 @@ mod tests {
             rx: 9_000_000,
             tx: 100,
         }];
-        let backend = ratatui::backend::TestBackend::new(120, 40); // alto → con histórico
+        let backend = ratatui::backend::TestBackend::new(120, 40); // alto → con banda de servidores
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|f| draw(f, &m)).unwrap();
         let buf = terminal.backend().buffer().clone();
         let s: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(s.contains("CaudalGhost"), "cabecera");
-        assert!(s.contains("ahora"), "banda vivo (título · ahora)");
-        assert!(s.contains("histórico"), "banda histórico");
+        assert!(s.contains("ahora"), "banda interfaces (título · ahora)");
+        assert!(
+            s.contains("histórico"),
+            "banda apps en histórico (vista_apps)"
+        );
         assert!(s.contains("megasync"), "dato histórico");
+        assert!(s.contains("servidores"), "banda servidores");
         assert!(s.contains("salir"), "pie");
     }
 
@@ -2313,7 +2370,7 @@ mod tests {
         use super::etiqueta_modo;
         use crate::live::state::{Focus, Mode};
         assert_eq!(etiqueta_modo(Mode::Normal, Focus::Grafico), "[NORMAL]");
-        assert_eq!(etiqueta_modo(Mode::Zoom, Focus::AppsVivo), "[ZOOM apps]");
+        assert_eq!(etiqueta_modo(Mode::Zoom, Focus::Apps), "[ZOOM apps]");
         assert_eq!(etiqueta_modo(Mode::Filtro, Focus::Grafico), "[FILTRO]");
         assert_eq!(
             etiqueta_modo(Mode::PausaScrub, Focus::Grafico),
@@ -2371,12 +2428,12 @@ mod tests {
     #[test]
     fn smoke_render_zoom_no_panica_en_los_cinco_focos_y_omite_lo_no_enfocado() {
         use crate::live::state::{Focus, Mode};
+        use caudalghost_core::types::AppRemoteDelta;
         let focos = [
             Focus::Grafico,
-            Focus::AppsVivo,
-            Focus::IfacesVivo,
-            Focus::AppsHist,
-            Focus::IfacesHist,
+            Focus::Apps,
+            Focus::Interfaces,
+            Focus::Servidores,
         ];
         for f in focos {
             let mut m = LiveModel {
@@ -2391,6 +2448,12 @@ mod tests {
                 0,
                 &[("eth0", 1024, 512)],
             )];
+            m.samples[0].flows.push(AppRemoteDelta {
+                app: "firefox".into(),
+                host: "github.com".into(),
+                rx: 1024,
+                tx: 512,
+            });
             m.hist_apps = vec![caudalghost_core::proto::AppRow {
                 app: "megasync".into(),
                 rx: 9_000_000,
@@ -2415,11 +2478,10 @@ mod tests {
                     s.contains("acumulando") || s.contains("KiB") || s.contains('↓'),
                     "{f:?} {s:?}"
                 ),
-                Focus::AppsVivo | Focus::AppsHist => {
-                    assert!(s.to_lowercase().contains("app"), "{f:?} {s:?}")
-                }
-                Focus::IfacesVivo | Focus::IfacesHist => {
-                    assert!(s.contains("eth0"), "{f:?} {s:?}")
+                Focus::Apps => assert!(s.to_lowercase().contains("app"), "{f:?} {s:?}"),
+                Focus::Interfaces => assert!(s.contains("eth0"), "{f:?} {s:?}"),
+                Focus::Servidores => {
+                    assert!(s.contains("github.com"), "{f:?} {s:?}")
                 }
             }
         }
@@ -2501,6 +2563,40 @@ mod tests {
             k.iter().any(|(t, _)| t.contains('r')),
             "rango en el keymap: {k:?}"
         );
+    }
+
+    #[test]
+    fn keymap_incluye_vista() {
+        assert!(
+            crate::live::state::keymap_activo()
+                .iter()
+                .any(|(t, _)| t.contains('v')),
+            "'v' en el keymap"
+        );
+    }
+
+    #[test]
+    fn dashboard_por_defecto_muestra_servidores() {
+        let mut m = LiveModel {
+            version: "0.6.4".into(),
+            ebpf: true,
+            connected: true,
+            ..Default::default()
+        };
+        m.samples = vec![crate::live::state::tests_support::sample_apps(
+            0,
+            &[("firefox", 2048, 256)],
+        )];
+        let backend = ratatui::backend::TestBackend::new(120, 40);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &m)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            s.contains("servidores"),
+            "la vista por defecto muestra la banda de servidores: {s:?}"
+        );
+        assert!(s.contains("CaudalGhost") && s.contains("salir"));
     }
 
     #[test]
