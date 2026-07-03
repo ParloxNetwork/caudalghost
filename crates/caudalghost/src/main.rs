@@ -50,6 +50,12 @@ struct OpcionesSalida {
     /// Proyección de columnas para csv/json/ndjson (coma-separadas). Válidas: las de la cabecera del comando.
     #[arg(long, value_name = "a,b,c", value_delimiter = ',')]
     fields: Vec<String>,
+    /// Refresca la salida cada `--interval` s hasta Ctrl-C (solo -o table).
+    #[arg(long)]
+    watch: bool,
+    /// Segundos entre refrescos con --watch.
+    #[arg(long, value_name = "SECS", default_value_t = 2)]
+    interval: u64,
 }
 
 impl OpcionesSalida {
@@ -322,9 +328,54 @@ enum Cmd {
     Man,
 }
 
+/// Secuencia ANSI para limpiar pantalla y volver al origen (usada por --watch).
+const LIMPIAR_PANTALLA: &str = "\x1b[2J\x1b[H";
+
+/// `--watch` solo tiene sentido en `-o table`; en máquina, error claro (exit 1).
+fn validar_watch(fmt: Formato, watch: bool) -> Result<(), SalidaError> {
+    if watch && fmt != Formato::Table {
+        return Err(SalidaError::Otro(
+            "--watch solo aplica a -o table (para máquina usa un bucle de shell)".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Intervalo efectivo del refresco: mínimo 1 s (evita busy-loop con 0).
+fn intervalo_efectivo(interval: u64) -> u64 {
+    interval.max(1)
+}
+
+/// Ejecuta el comando en bucle hasta Ctrl-C. Corta en el PRIMER error
+/// (predecible: sale con su exit code). El primer render va SIN limpiar la
+/// pantalla, para que un error inmediato (uso, rango, daemon caído) se muestre
+/// sin borrar lo que el usuario tenía en la terminal; los refrescos siguientes
+/// sí limpian antes de repintar.
+fn ejecutar_en_bucle(cli: &Cli) -> Result<(), SalidaError> {
+    use std::io::Write;
+    let salida = cli
+        .salida()
+        .expect("--watch solo en subcomandos con OpcionesSalida");
+    validar_watch(cli.formato(), true)?;
+    let secs = intervalo_efectivo(salida.interval);
+    run(cli)?;
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        print!("{LIMPIAR_PANTALLA}");
+        let _ = std::io::stdout().flush();
+        run(cli)?;
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    if let Err(e) = run(&cli) {
+    let watch = cli.salida().map(|s| s.watch).unwrap_or(false);
+    let resultado = if watch {
+        ejecutar_en_bucle(&cli)
+    } else {
+        run(&cli)
+    };
+    if let Err(e) = resultado {
         if cli.formato() == Formato::Json {
             eprintln!("{}", e.a_json());
         } else {
@@ -1288,5 +1339,31 @@ mod tests {
         let cli = Cli::try_parse_from(["caudalghost", "top", "hoy", "--fields", "app"]).unwrap();
         let salida = cli.salida().unwrap();
         assert!(fields_para::<caudalghost_core::proto::AppRow>(salida).is_err());
+    }
+
+    #[test]
+    fn validar_watch_solo_table() {
+        assert!(super::validar_watch(Formato::Table, true).is_ok());
+        let e = super::validar_watch(Formato::Json, true).unwrap_err();
+        assert_eq!(e.exit_code(), 1);
+        assert!(super::validar_watch(Formato::Csv, true).is_err());
+        assert!(super::validar_watch(Formato::Json, false).is_ok()); // sin watch, no valida
+    }
+
+    #[test]
+    fn intervalo_efectivo_minimo_uno() {
+        assert_eq!(super::intervalo_efectivo(0), 1);
+        assert_eq!(super::intervalo_efectivo(5), 5);
+    }
+
+    #[test]
+    fn watch_parsea_en_datos_no_en_live() {
+        assert!(
+            Cli::try_parse_from(["caudalghost", "total", "hoy", "--watch", "--interval", "5"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["caudalghost", "serie", "hoy", "--watch"]).is_ok());
+        assert!(Cli::try_parse_from(["caudalghost", "live", "--watch"]).is_err());
+        // live no lleva OpcionesSalida
     }
 }
