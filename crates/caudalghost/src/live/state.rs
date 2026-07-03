@@ -635,6 +635,31 @@ pub fn nivel_umbral(serie: &[u64], actual: u64) -> Nivel {
     }
 }
 
+/// Ventana de suavizado (segundos) del resaltado por umbral. La media de estos segundos se
+/// compara contra los percentiles de la serie IGUALMENTE suavizada (sostenido vs sostenido),
+/// así el color no parpadea de tick a tick y los tres tonos siguen apareciendo con sentido.
+pub const SUAVIZADO_UMBRAL_SECS: usize = 10;
+
+/// Media de los últimos `n` valores de la serie (0 si está vacía o `n == 0`).
+pub fn media_reciente(serie: &[u64], n: usize) -> u64 {
+    if serie.is_empty() || n == 0 {
+        return 0;
+    }
+    let start = serie.len().saturating_sub(n);
+    let slice = &serie[start..];
+    let suma: u64 = slice.iter().copied().sum();
+    suma / slice.len() as u64
+}
+
+/// Serie suavizada: cada punto es la media móvil trasera de los `n` valores que terminan en él.
+/// Comparar el "actual" (su último punto) contra los percentiles de ESTA serie da un umbral
+/// estable (sostenido vs sostenido), en vez de un instante contra picos sueltos.
+pub fn serie_suavizada(serie: &[u64], n: usize) -> Vec<u64> {
+    (0..serie.len())
+        .map(|i| media_reciente(&serie[..=i], n))
+        .collect()
+}
+
 #[cfg(test)]
 pub mod tests_support {
     use caudalghost_core::types::{IfaceDelta, Sample};
@@ -1317,6 +1342,33 @@ mod tests {
     #[test]
     fn nivel_umbral_serie_vacia_es_verde() {
         assert_eq!(nivel_umbral(&[], 100), Nivel::Verde);
+    }
+
+    #[test]
+    fn media_reciente_suaviza_los_ultimos_n() {
+        use super::media_reciente;
+        // media de los últimos 3: (30+40+50)/3 = 40 (ignora los primeros, spiky)
+        assert_eq!(media_reciente(&[1000, 0, 30, 40, 50], 3), 40);
+        // n mayor que la serie → media de toda la serie
+        assert_eq!(media_reciente(&[10, 20], 5), 15);
+        // suaviza un pico suelto: [0,0,0,0,120] con ventana 5 → 24 (no 120)
+        assert_eq!(media_reciente(&[0, 0, 0, 0, 120], 5), 24);
+        assert_eq!(media_reciente(&[], 5), 0);
+        assert_eq!(media_reciente(&[10, 20, 30], 0), 0);
+    }
+
+    #[test]
+    fn serie_suavizada_media_movil_trasera() {
+        use super::{media_reciente, serie_suavizada};
+        // ventana 2: cada punto = media de los ≤2 valores que terminan en él
+        assert_eq!(serie_suavizada(&[10, 20, 30], 2), vec![10, 15, 25]);
+        // el último punto coincide con la media reciente de toda la serie
+        let s = [4u64, 8, 12, 16];
+        assert_eq!(
+            *serie_suavizada(&s, 3).last().unwrap(),
+            media_reciente(&s, 3)
+        );
+        assert!(serie_suavizada(&[], 5).is_empty());
     }
 
     #[test]
