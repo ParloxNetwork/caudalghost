@@ -72,6 +72,11 @@ pub fn format_bytes(b: u64) -> String {
     format_units(b, UnitMode::Binary)
 }
 
+/// Formatea una tasa (bytes/s) según el modo: `format_units` + sufijo "/s".
+pub fn format_rate(bytes: u64, mode: UnitMode) -> String {
+    format!("{}/s", format_units(bytes, mode))
+}
+
 /// Tabla de actividad en vivo: una fila por interfaz con tasas y sparkline.
 /// `filas` = (iface, rx_total, tx_total, serie por segundo rx+tx).
 pub fn tabla_now(filas: &[(String, u64, u64, Vec<u64>)], secs: u64) -> Table {
@@ -261,5 +266,13 @@ mod tests {
     fn format_bytes_sigue_siendo_binario() {
         assert_eq!(format_bytes(1536), "1.5 KiB");
         assert_eq!(format_bytes(5 * 1024 * 1024 * 1024), "5.0 GiB");
+    }
+
+    #[test]
+    fn format_rate_añade_sufijo_por_segundo() {
+        assert_eq!(format_rate(0, UnitMode::Binary), "0 B/s");
+        assert_eq!(format_rate(1536, UnitMode::Binary), "1.5 KiB/s");
+        assert_eq!(format_rate(1500, UnitMode::Decimal), "1.5 KB/s");
+        assert_eq!(format_rate(125_000, UnitMode::Bits), "1.0 Mb/s");
     }
 }

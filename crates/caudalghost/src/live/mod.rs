@@ -5,7 +5,7 @@ pub mod state;
 pub mod ui;
 
 use caudalghost_core::proto::{Request, Response};
-use state::{apply_key, Action, LiveModel};
+use state::{apply_key, Action, Key, LiveModel};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -92,18 +92,36 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
     loop {
         model.frame = model.frame.wrapping_add(1);
 
-        if !model.paused && last_fetch.elapsed() >= tick {
+        let espera = if model.connected {
+            tick
+        } else {
+            state::siguiente_backoff(model.reconnect_attempts)
+        };
+        if !model.paused && last_fetch.elapsed() >= espera {
             // Re-pedir Ping cada tick: refresca versión y estado eBPF. Sin esto, si el
             // daemon se relanza con sudo (eBPF pasa a activo), el flag quedaría congelado
             // en el valor de arranque y los paneles de apps seguirían con el aviso.
-            match crate::client::call(socket, &Request::Ping) {
-                Ok(resp) => apply_pong(&mut model, &resp),
-                Err(_) => mark_disconnected(&mut model),
-            }
-            match crate::client::call(socket, &Request::Snapshot { seconds: window }) {
-                Ok(resp) => apply_snapshot(&mut model, &resp),
-                Err(_) => mark_disconnected(&mut model),
-            }
+            let ok_ping = match crate::client::call(socket, &Request::Ping) {
+                Ok(resp) => {
+                    apply_pong(&mut model, &resp);
+                    true
+                }
+                Err(_) => {
+                    mark_disconnected(&mut model);
+                    false
+                }
+            };
+            let ok_snapshot =
+                match crate::client::call(socket, &Request::Snapshot { seconds: window }) {
+                    Ok(resp) => {
+                        apply_snapshot(&mut model, &resp);
+                        true
+                    }
+                    Err(_) => {
+                        mark_disconnected(&mut model);
+                        false
+                    }
+                };
             model.iface_ips = netinfo::read_iface_ipv4s();
             if let Ok(resp) = crate::client::call(
                 socket,
@@ -123,6 +141,11 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
             ) {
                 apply_total_apps(&mut model, &resp);
             }
+            if ok_ping && ok_snapshot {
+                model.reconnect_attempts = 0;
+            } else {
+                model.reconnect_attempts = model.reconnect_attempts.saturating_add(1);
+            }
             last_fetch = Instant::now();
         }
 
@@ -138,13 +161,20 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(k) = event::read()? {
                 if k.kind == KeyEventKind::Press {
-                    let ch = match k.code {
-                        KeyCode::Char(c) => c,
-                        KeyCode::Esc => '\u{1b}',
-                        KeyCode::Tab => '\t',
+                    let key = match k.code {
+                        KeyCode::Char(c) => Key::Char(c),
+                        KeyCode::Esc => Key::Esc,
+                        KeyCode::Enter => Key::Enter,
+                        KeyCode::Backspace => Key::Backspace,
+                        KeyCode::Tab => Key::Tab,
+                        KeyCode::BackTab => Key::ShiftTab,
+                        KeyCode::Up => Key::Up,
+                        KeyCode::Down => Key::Down,
+                        KeyCode::Left => Key::Left,
+                        KeyCode::Right => Key::Right,
                         _ => continue,
                     };
-                    if apply_key(&mut model, ch) == Action::Quit {
+                    if apply_key(&mut model, key) == Action::Quit {
                         break;
                     }
                 }
@@ -171,8 +201,9 @@ pub fn render_to_string(model: &LiveModel, width: u16, height: u16) -> String {
         .collect::<String>()
 }
 
-/// `--self-test`: renderiza un frame sintético sin abrir TTY y devuelve Ok.
-/// Sale 0 si no hay panic. Smoke headless del dashboard.
+/// `--self-test`: renderiza frames sintéticos sin abrir TTY y devuelve Ok.
+/// Sale 0 si no hay panic. Smoke headless del dashboard: cubre el modo
+/// Normal (por defecto) y el overlay de Ayuda.
 pub fn self_test() -> anyhow::Result<()> {
     let model = LiveModel {
         version: "self-test".into(),
@@ -181,6 +212,16 @@ pub fn self_test() -> anyhow::Result<()> {
         ..Default::default()
     };
     let _ = render_to_string(&model, 100, 30);
+
+    let model_ayuda = LiveModel {
+        version: "self-test".into(),
+        ebpf: false,
+        connected: true,
+        mode: state::Mode::Ayuda,
+        ..Default::default()
+    };
+    let _ = render_to_string(&model_ayuda, 100, 30);
+
     println!("caudalghost live --self-test: OK");
     Ok(())
 }
@@ -199,6 +240,20 @@ mod tests {
         let s = render_to_string(&model, 80, 24);
         assert!(!s.trim().is_empty());
         assert!(s.chars().count() == 80 * 24);
+    }
+
+    #[test]
+    fn render_to_string_modo_ayuda_no_panica_y_produce_contenido() {
+        let model = LiveModel {
+            version: "0.1.0".into(),
+            connected: true,
+            mode: state::Mode::Ayuda,
+            ..Default::default()
+        };
+        let s = render_to_string(&model, 100, 30);
+        assert!(!s.trim().is_empty());
+        assert!(s.chars().count() == 100 * 30);
+        assert!(s.contains("ayuda") || s.contains("AYUDA"));
     }
 
     #[test]
