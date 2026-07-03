@@ -1,4 +1,5 @@
-use caudalghost_core::proto::{AppRow, RemoteRow, TotalRow};
+use caudalghost_core::proto::{AppRow, Bucket, RemoteRow, SeriePoint, TotalRow};
+use chrono::{Local, TimeZone};
 use comfy_table::{presets::UTF8_FULL_CONDENSED, Cell, CellAlignment, Table};
 use owo_colors::{OwoColorize, Stream::Stdout};
 use serde::Serialize;
@@ -136,6 +137,59 @@ impl Tabulable for RemoteRow {
             format_units(self.tx, u),
             format_units(self.rx + self.tx, u),
         ]
+    }
+}
+
+/// Fila de presentación para `serie`: un punto de la serie temporal con la
+/// etiqueta de tiempo ya formateada según el cubo. Serializa CRUDO (ts/rx/tx)
+/// para json/ndjson (apto para jq); la etiqueta es solo para table/csv.
+#[derive(Serialize)]
+pub struct SerieRow {
+    pub ts: i64,
+    pub rx: u64,
+    pub tx: u64,
+    #[serde(skip)]
+    etiqueta: String,
+}
+
+impl SerieRow {
+    /// Formatea `ts` (epoch UTC) a hora LOCAL según el cubo.
+    pub fn desde(p: &SeriePoint, bucket: Bucket) -> SerieRow {
+        let fmt = match bucket {
+            Bucket::Minute | Bucket::Hour => "%m-%d %H:%M",
+            Bucket::Day => "%Y-%m-%d",
+        };
+        let etiqueta = Local
+            .timestamp_opt(p.ts, 0)
+            .single()
+            .map(|dt| dt.format(fmt).to_string())
+            .unwrap_or_else(|| p.ts.to_string());
+        SerieRow {
+            ts: p.ts,
+            rx: p.rx,
+            tx: p.tx,
+            etiqueta,
+        }
+    }
+}
+
+impl Tabulable for SerieRow {
+    fn cabecera() -> Vec<&'static str> {
+        vec!["tiempo", "rx", "tx", "total"]
+    }
+    fn campos(&self, u: UnitMode) -> Vec<String> {
+        vec![
+            self.etiqueta.clone(),
+            format_units(self.rx, u),
+            format_units(self.tx, u),
+            format_units(self.rx + self.tx, u),
+        ]
+    }
+}
+
+impl ConRxTx for SerieRow {
+    fn rx_tx(&self) -> (u64, u64) {
+        (self.rx, self.tx)
     }
 }
 
@@ -625,5 +679,49 @@ mod tests {
             Some(1),
         );
         assert!(json.contains("firefox") && !json.contains("curl") && !json.contains("ssh"));
+    }
+
+    #[test]
+    fn serie_row_cabecera_y_serializa_crudo() {
+        use caudalghost_core::proto::{Bucket, SeriePoint};
+        let p = SeriePoint {
+            ts: 1_720_000_000,
+            rx: 100,
+            tx: 20,
+        };
+        let row = super::SerieRow::desde(&p, Bucket::Hour);
+        assert_eq!(
+            super::SerieRow::cabecera(),
+            vec!["tiempo", "rx", "tx", "total"]
+        );
+        let c = row.campos(UnitMode::Binary);
+        assert_eq!(c[0], row_etiqueta(&row)); // etiqueta no vacía
+        assert!(!c[0].is_empty());
+        assert_eq!(c[3], "120 B"); // total = rx+tx
+                                   // json/ndjson: crudo ts/rx/tx, SIN 'etiqueta' ni 'total'
+        let j = serde_json::to_string(&row).unwrap();
+        assert!(
+            j.contains("\"ts\":1720000000") && j.contains("\"rx\":100") && j.contains("\"tx\":20")
+        );
+        assert!(!j.contains("etiqueta") && !j.contains("total"));
+    }
+    fn row_etiqueta(r: &super::SerieRow) -> String {
+        r.campos(UnitMode::Binary)[0].clone()
+    }
+
+    #[test]
+    fn serie_row_etiqueta_por_bucket() {
+        use caudalghost_core::proto::{Bucket, SeriePoint};
+        let p = SeriePoint {
+            ts: 1_720_000_000,
+            rx: 1,
+            tx: 1,
+        };
+        let dia = super::SerieRow::desde(&p, Bucket::Day).campos(UnitMode::Binary)[0].clone();
+        // Day => "YYYY-MM-DD" (10 chars, dos guiones)
+        assert_eq!(dia.len(), 10, "etiqueta día: {dia}");
+        assert_eq!(dia.matches('-').count(), 2);
+        let hora = super::SerieRow::desde(&p, Bucket::Hour).campos(UnitMode::Binary)[0].clone();
+        assert!(hora.contains(':'), "etiqueta hora lleva HH:MM: {hora}");
     }
 }
