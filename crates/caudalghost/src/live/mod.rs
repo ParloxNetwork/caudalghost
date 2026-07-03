@@ -52,6 +52,13 @@ pub fn apply_top_remotes(model: &mut LiveModel, resp: &Response) {
     }
 }
 
+/// Aplica una respuesta TopRemotes (todas las apps) al panel de servidores en histórico.
+pub fn apply_servidores_hist(model: &mut LiveModel, resp: &Response) {
+    if let Response::TopRemotes { rows } = resp {
+        model.servidores_hist = rows.clone();
+    }
+}
+
 /// Restaura la terminal al salir aunque haya panic.
 struct TerminalGuard;
 impl Drop for TerminalGuard {
@@ -150,9 +157,21 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
             ) {
                 apply_total_apps(&mut model, &resp);
             }
+            if model.vista_servidores == state::Vista::Historico {
+                if let Ok(resp) = crate::client::call(
+                    socket,
+                    &Request::TopRemotes {
+                        start: h_start,
+                        end: h_end,
+                        app: None,
+                    },
+                ) {
+                    apply_servidores_hist(&mut model, &resp);
+                }
+            }
             if model.mode == state::Mode::Drilldown {
                 if let Some(d) = model.drill.clone() {
-                    if d.desde == state::Focus::AppsHist {
+                    if d.vista == state::Vista::Historico {
                         if let Ok(resp) = crate::client::call(
                             socket,
                             &Request::TopRemotes {
@@ -360,5 +379,22 @@ mod tests {
         super::apply_top_remotes(&mut m, &resp);
         assert_eq!(m.drill_hosts.len(), 1);
         assert_eq!(m.drill_hosts[0].host, "github.com");
+    }
+
+    #[test]
+    fn apply_top_remotes_servidores_puebla() {
+        use caudalghost_core::proto::{RemoteRow, Response};
+        let mut m = LiveModel::default();
+        super::apply_servidores_hist(
+            &mut m,
+            &Response::TopRemotes {
+                rows: vec![RemoteRow {
+                    host: "x.com".into(),
+                    rx: 9,
+                    tx: 1,
+                }],
+            },
+        );
+        assert_eq!(m.servidores_hist.len(), 1);
     }
 }

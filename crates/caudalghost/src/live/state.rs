@@ -17,22 +17,32 @@ pub enum Mode {
 }
 
 /// Panel con el foco de navegación (Tab/Shift+Tab ciclan entre estos).
+/// Cada panel (Apps/Interfaces/Servidores) tiene su propia `Vista` (ahora/histórico,
+/// ver más abajo); `Focus` solo identifica el panel, no su vista activa (0.6.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     #[default]
     Grafico,
-    AppsVivo,
-    IfacesVivo,
-    AppsHist,
-    IfacesHist,
+    Apps,
+    Interfaces,
+    Servidores,
 }
 
-/// Estado del drill-down activo: app elegida y desde qué panel se entró
-/// (determina si el histórico pide `TopRemotes` o el en-vivo agrega `flows`).
+/// Vista activa de un panel (apps/interfaces/servidores): en vivo o histórico.
+/// Alternada con la tecla `v` sobre el panel enfocado (0.6.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Vista {
+    #[default]
+    Ahora,
+    Historico,
+}
+
+/// Estado del drill-down activo: app elegida y la vista del panel de apps al
+/// entrar (determina si el histórico pide `TopRemotes` o el en-vivo agrega `flows`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drill {
     pub app: String,
-    pub desde: Focus,
+    pub vista: Vista,
 }
 
 /// Tecla lógica, independiente del backend de terminal (crossterm).
@@ -90,6 +100,14 @@ pub struct LiveModel {
     pub hist_range_idx: usize,
     /// Hosts remotos de la app en drill histórico (poblado por `TopRemotes`).
     pub drill_hosts: Vec<caudalghost_core::proto::RemoteRow>,
+    /// Vista activa (Ahora/Histórico) del panel de apps.
+    pub vista_apps: Vista,
+    /// Vista activa (Ahora/Histórico) del panel de interfaces.
+    pub vista_ifaces: Vista,
+    /// Vista activa (Ahora/Histórico) del panel de servidores.
+    pub vista_servidores: Vista,
+    /// Top de hosts remotos (todas las apps) en histórico, poblado por `TopRemotes{app:None}`.
+    pub servidores_hist: Vec<caudalghost_core::proto::RemoteRow>,
 }
 
 /// Tokens de rango histórico ciclables con 'r': "todo" es el registro completo.
@@ -160,10 +178,18 @@ impl LiveModel {
     fn filas_panel_enfocado(&self) -> usize {
         match self.focus {
             Focus::Grafico => 0,
-            Focus::AppsVivo => self.top_apps().len(),
-            Focus::IfacesVivo => self.iface_rows().len(),
-            Focus::AppsHist => self.hist_apps.len(),
-            Focus::IfacesHist => self.hist_ifaces.len(),
+            Focus::Apps => match self.vista_apps {
+                Vista::Ahora => self.top_apps().len(),
+                Vista::Historico => self.hist_apps.len(),
+            },
+            Focus::Interfaces => match self.vista_ifaces {
+                Vista::Ahora => self.iface_rows().len(),
+                Vista::Historico => self.hist_ifaces.len(),
+            },
+            Focus::Servidores => match self.vista_servidores {
+                Vista::Ahora => self.top_hosts_vivo().len(),
+                Vista::Historico => self.servidores_hist.len(),
+            },
         }
     }
 
@@ -222,18 +248,41 @@ impl LiveModel {
         v
     }
 
+    /// Hosts remotos agregados por host sobre los últimos PANEL_WINDOW_SECS samples (en
+    /// vivo), sumando TODAS las apps (a diferencia de `hosts_de_app`, que filtra por una
+    /// app). Alimenta el panel de servidores (Task 3, 0.6.4). Ordenado por total desc.
+    pub fn top_hosts_vivo(&self) -> Vec<(String, u64, u64)> {
+        use std::collections::HashMap;
+        let start = self.samples.len().saturating_sub(PANEL_WINDOW_SECS);
+        let mut acc: HashMap<String, (u64, u64)> = HashMap::new();
+        for s in &self.samples[start..] {
+            for f in &s.flows {
+                let e = acc.entry(f.host.clone()).or_default();
+                e.0 += f.rx;
+                e.1 += f.tx;
+            }
+        }
+        let mut v: Vec<(String, u64, u64)> =
+            acc.into_iter().map(|(k, (rx, tx))| (k, rx, tx)).collect();
+        v.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
+        v
+    }
+
     /// App en `selected_row` del panel de apps enfocado (mismo orden/filtro que dibuja
     /// ui.rs: top_apps()/hist_apps ordenado desc, filtrado por `nombre_coincide`).
-    /// `None` si el foco no es un panel de apps o no hay selección válida.
+    /// `None` si el foco no es el panel de apps o no hay selección válida.
     pub fn app_seleccionada(&self) -> Option<String> {
-        let nombres: Vec<String> = match self.focus {
-            Focus::AppsVivo => self
+        if self.focus != Focus::Apps {
+            return None;
+        }
+        let nombres: Vec<String> = match self.vista_apps {
+            Vista::Ahora => self
                 .top_apps()
                 .into_iter()
                 .map(|(a, _, _)| a)
                 .filter(|a| nombre_coincide(a, &self.filtro))
                 .collect(),
-            Focus::AppsHist => {
+            Vista::Historico => {
                 let mut v: Vec<(String, u64, u64)> = self
                     .hist_apps
                     .iter()
@@ -245,7 +294,6 @@ impl LiveModel {
                     .filter(|a| nombre_coincide(a, &self.filtro))
                     .collect()
             }
-            _ => return None,
         };
         nombres.get(self.selected_row).cloned()
     }
@@ -272,15 +320,14 @@ pub enum Action {
     Quit,
 }
 
-/// Cicla el foco de panel en el orden fijo Grafico→AppsVivo→IfacesVivo→AppsHist→
-/// IfacesHist→(vuelve a Grafico). `forward=false` recorre el orden inverso.
+/// Cicla el foco de panel en el orden fijo Grafico→Apps→Interfaces→Servidores→
+/// (vuelve a Grafico). `forward=false` recorre el orden inverso.
 fn cycle_focus(f: Focus, forward: bool) -> Focus {
-    const ORDEN: [Focus; 5] = [
+    const ORDEN: [Focus; 4] = [
         Focus::Grafico,
-        Focus::AppsVivo,
-        Focus::IfacesVivo,
-        Focus::AppsHist,
-        Focus::IfacesHist,
+        Focus::Apps,
+        Focus::Interfaces,
+        Focus::Servidores,
     ];
     let i = ORDEN.iter().position(|x| *x == f).unwrap_or(0);
     let n = ORDEN.len();
@@ -329,6 +376,7 @@ pub fn keymap_activo() -> Vec<(&'static str, &'static str)> {
         ("→/l", "Hosts de la app (drill-down)"),
         ("←", "Volver (sale del drill-down)"),
         ("r", "Ciclar rango histórico (todo/hoy/ayer/7d/30d)"),
+        ("v", "Alternar vista ahora/histórico del panel enfocado"),
         ("?", "Overlay de ayuda"),
     ]
 }
@@ -451,20 +499,46 @@ pub fn apply_key(model: &mut LiveModel, key: Key) -> Action {
             model.scrub_idx = Some(mover_indice(idx, len, 1));
             Action::Redraw
         }
-        Key::Right | Key::Char('l')
-            if model.mode == Mode::Normal
-                && matches!(model.focus, Focus::AppsVivo | Focus::AppsHist) =>
-        {
+        Key::Right | Key::Char('l') if model.mode == Mode::Normal && model.focus == Focus::Apps => {
             if let Some(app) = model.app_seleccionada() {
                 model.drill = Some(Drill {
                     app,
-                    desde: model.focus,
+                    vista: model.vista_apps,
                 });
                 model.mode = Mode::Drilldown;
                 Action::Redraw
             } else {
                 Action::None
             }
+        }
+        Key::Char('v') if model.mode == Mode::Normal => {
+            match model.focus {
+                Focus::Grafico => {}
+                Focus::Apps => {
+                    model.vista_apps = match model.vista_apps {
+                        Vista::Ahora => Vista::Historico,
+                        Vista::Historico => Vista::Ahora,
+                    };
+                }
+                Focus::Interfaces => {
+                    model.vista_ifaces = match model.vista_ifaces {
+                        Vista::Ahora => Vista::Historico,
+                        Vista::Historico => Vista::Ahora,
+                    };
+                }
+                Focus::Servidores => {
+                    model.vista_servidores = match model.vista_servidores {
+                        Vista::Ahora => Vista::Historico,
+                        Vista::Historico => Vista::Ahora,
+                    };
+                }
+            }
+            // Al alternar la vista, la lista cambia de largo: reinicia la selección
+            // para no dejarla apuntando a una fila fuera de rango (igual que Tab).
+            if model.focus != Focus::Grafico {
+                model.selected_row = 0;
+            }
+            Action::Redraw
         }
         Key::Char('r') => {
             model.hist_range_idx = (model.hist_range_idx + 1) % RANGOS.len();
@@ -970,15 +1044,61 @@ mod tests {
     }
 
     #[test]
-    fn cycle_focus_recorre_los_cinco_en_orden_y_envuelve() {
-        assert_eq!(cycle_focus(Focus::Grafico, true), Focus::AppsVivo);
-        assert_eq!(cycle_focus(Focus::AppsVivo, true), Focus::IfacesVivo);
-        assert_eq!(cycle_focus(Focus::IfacesVivo, true), Focus::AppsHist);
-        assert_eq!(cycle_focus(Focus::AppsHist, true), Focus::IfacesHist);
-        assert_eq!(cycle_focus(Focus::IfacesHist, true), Focus::Grafico);
+    fn cycle_focus_cuatro_focos() {
+        assert_eq!(cycle_focus(Focus::Grafico, true), Focus::Apps);
+        assert_eq!(cycle_focus(Focus::Apps, true), Focus::Interfaces);
+        assert_eq!(cycle_focus(Focus::Interfaces, true), Focus::Servidores);
+        assert_eq!(cycle_focus(Focus::Servidores, true), Focus::Grafico);
         // hacia atrás
-        assert_eq!(cycle_focus(Focus::Grafico, false), Focus::IfacesHist);
-        assert_eq!(cycle_focus(Focus::AppsVivo, false), Focus::Grafico);
+        assert_eq!(cycle_focus(Focus::Grafico, false), Focus::Servidores);
+        assert_eq!(cycle_focus(Focus::Apps, false), Focus::Grafico);
+    }
+
+    #[test]
+    fn apply_key_v_alterna_vista_del_panel_enfocado() {
+        let mut m = LiveModel {
+            focus: Focus::Apps,
+            ..Default::default()
+        };
+        assert_eq!(m.vista_apps, Vista::Ahora);
+        apply_key(&mut m, Key::Char('v'));
+        assert_eq!(m.vista_apps, Vista::Historico);
+        m.focus = Focus::Servidores;
+        apply_key(&mut m, Key::Char('v'));
+        assert_eq!(m.vista_servidores, Vista::Historico);
+        m.focus = Focus::Grafico;
+        let before = (m.vista_apps, m.vista_ifaces, m.vista_servidores);
+        apply_key(&mut m, Key::Char('v')); // Grafico: no-op
+        assert_eq!((m.vista_apps, m.vista_ifaces, m.vista_servidores), before);
+    }
+
+    #[test]
+    fn apply_key_v_reinicia_seleccion() {
+        let mut m = LiveModel {
+            focus: Focus::Apps,
+            selected_row: 5,
+            ..Default::default()
+        };
+        apply_key(&mut m, Key::Char('v'));
+        assert_eq!(m.selected_row, 0, "alternar vista reinicia la selección");
+    }
+
+    #[test]
+    fn drill_arma_vista_del_panel() {
+        use caudalghost_core::proto::AppRow;
+        let mut m = LiveModel {
+            focus: Focus::Apps,
+            vista_apps: Vista::Historico,
+            hist_apps: vec![AppRow {
+                app: "firefox".into(),
+                rx: 9,
+                tx: 1,
+            }],
+            ..Default::default()
+        };
+        apply_key(&mut m, Key::Right);
+        assert_eq!(m.mode, Mode::Drilldown);
+        assert_eq!(m.drill.as_ref().map(|d| d.vista), Some(Vista::Historico));
     }
 
     #[test]
@@ -998,7 +1118,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(apply_key(&mut m, Key::Tab), Action::Redraw);
-        assert_eq!(m.focus, Focus::AppsVivo);
+        assert_eq!(m.focus, Focus::Apps);
         assert_eq!(m.selected_row, 0);
     }
 
@@ -1010,14 +1130,14 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(apply_key(&mut m, Key::ShiftTab), Action::Redraw);
-        assert_eq!(m.focus, Focus::IfacesHist);
+        assert_eq!(m.focus, Focus::Servidores);
         assert_eq!(m.selected_row, 0);
     }
 
     #[test]
     fn apply_key_j_k_mueven_selected_row_con_clamp() {
         let mut m = LiveModel {
-            focus: Focus::AppsVivo,
+            focus: Focus::Apps,
             selected_row: 0,
             samples: vec![tests_support::sample_apps(
                 0,
@@ -1053,16 +1173,12 @@ mod tests {
     fn apply_key_enter_en_normal_entra_en_zoom_del_panel_enfocado() {
         let mut m = LiveModel {
             mode: Mode::Normal,
-            focus: Focus::AppsVivo,
+            focus: Focus::Apps,
             ..Default::default()
         };
         assert_eq!(apply_key(&mut m, Key::Enter), Action::Redraw);
         assert_eq!(m.mode, Mode::Zoom);
-        assert_eq!(
-            m.focus,
-            Focus::AppsVivo,
-            "el zoom no cambia el panel enfocado"
-        );
+        assert_eq!(m.focus, Focus::Apps, "el zoom no cambia el panel enfocado");
     }
 
     #[test]
@@ -1080,14 +1196,14 @@ mod tests {
     fn apply_key_esc_en_zoom_vuelve_a_normal() {
         let mut m = LiveModel {
             mode: Mode::Zoom,
-            focus: Focus::IfacesHist,
+            focus: Focus::Interfaces,
             ..Default::default()
         };
         assert_eq!(apply_key(&mut m, Key::Esc), Action::Redraw);
         assert_eq!(m.mode, Mode::Normal);
         assert_eq!(
             m.focus,
-            Focus::IfacesHist,
+            Focus::Interfaces,
             "Esc no cambia el panel enfocado"
         );
     }
@@ -1148,7 +1264,7 @@ mod tests {
     fn apply_key_tab_limpia_filtro_al_cambiar_de_foco() {
         let mut m = LiveModel {
             mode: Mode::Normal,
-            focus: Focus::AppsVivo,
+            focus: Focus::Apps,
             filtro: "fire".into(),
             ..Default::default()
         };
@@ -1157,7 +1273,7 @@ mod tests {
             m.filtro, "",
             "el filtro se limpia al cambiar de foco con Tab"
         );
-        assert_ne!(m.focus, Focus::AppsVivo);
+        assert_ne!(m.focus, Focus::Apps);
     }
 
     #[test]
@@ -1279,7 +1395,8 @@ mod tests {
     fn app_seleccionada_por_foco_y_seleccion() {
         use caudalghost_core::proto::AppRow;
         let mut m = LiveModel {
-            focus: Focus::AppsHist,
+            focus: Focus::Apps,
+            vista_apps: Vista::Historico,
             hist_apps: vec![
                 AppRow {
                     app: "mega".into(),
@@ -1312,7 +1429,8 @@ mod tests {
     fn apply_key_drill_entra_y_vuelve() {
         use caudalghost_core::proto::AppRow;
         let mut m = LiveModel {
-            focus: Focus::AppsHist,
+            focus: Focus::Apps,
+            vista_apps: Vista::Historico,
             hist_apps: vec![AppRow {
                 app: "firefox".into(),
                 rx: 9,
@@ -1353,5 +1471,35 @@ mod tests {
             apply_key(&mut m, Key::Char('r'));
         }
         assert_eq!(m.hist_range_idx, 0, "cicla con wrap");
+    }
+
+    #[test]
+    fn top_hosts_vivo_agrega_todas_las_apps() {
+        use caudalghost_core::types::{AppRemoteDelta, Sample};
+        let s = |flows: Vec<(&str, &str, u64, u64)>| Sample {
+            ts: 0,
+            deltas: vec![],
+            apps: vec![],
+            flows: flows
+                .into_iter()
+                .map(|(a, h, rx, tx)| AppRemoteDelta {
+                    app: a.into(),
+                    host: h.into(),
+                    rx,
+                    tx,
+                })
+                .collect(),
+        };
+        let m = LiveModel {
+            samples: vec![s(vec![
+                ("firefox", "github.com", 100, 10),
+                ("curl", "github.com", 50, 0),
+                ("firefox", "scdn.co", 5, 5),
+            ])],
+            ..Default::default()
+        };
+        let h = m.top_hosts_vivo();
+        assert_eq!(h[0], ("github.com".to_string(), 150, 10)); // suma firefox+curl al mismo host
+        assert_eq!(h.len(), 2);
     }
 }

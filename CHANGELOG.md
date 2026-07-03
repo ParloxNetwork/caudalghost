@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.4] — 2026-07-03
+
+### TUI (`caudalghost live`)
+
+Rediseño del layout: los **servidores** vuelven a la vista inicial y el histórico deja de duplicar cada
+panel (cliente-only).
+
+- **Banda de servidores:** panel nuevo, siempre visible, con el **top de servidores de todas las apps**
+  (`ahora` agrega el tráfico en vivo por host; `histórico` usa el registro del rango activo).
+- **Toggle de vista por panel:** cada panel (**apps · interfaces · servidores**) alterna
+  **`ahora` ↔ `histórico`** con **`v`** sobre el panel enfocado (`Tab`). El histórico arranca en `todo`
+  (todo el registro) y `r` lo cicla a `hoy/ayer/7d/30d`.
+- **Layout de 3 bandas:** gráficos · `apps | interfaces` · `servidores`. El foco pasa de 5 a 4 paneles
+  (`Gráficos · Apps · Interfaces · Servidores`), en vez de bandas "ahora"/"histórico" separadas.
+- Drill-down (`→`/`l`), scrub en pausa, ejes del gráfico y filtro (`/`) se conservan.
+
 ## [0.6.3] — 2026-07-03
 
 ### TUI (`caudalghost live`)
