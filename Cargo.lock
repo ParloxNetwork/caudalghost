@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "caudalghost"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "caudalghost-core",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "caudalghost-core"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "caudalghost-ebpf"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "aya-ebpf",
  "caudalghost-ebpf-common",
@@ -362,14 +362,14 @@ dependencies = [
 
 [[package]]
 name = "caudalghost-ebpf-common"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "aya",
 ]
 
 [[package]]
 name = "caudalghostd"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "aya",

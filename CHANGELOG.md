@@ -2,6 +2,42 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.0] — 2026-07-02
+
+### TUI (`caudalghost live`)
+
+Arranca el arco **0.6.x = TUI**: el dashboard de terminal gana consistencia y funciones que solo tienen
+sentido con la app viva a pantalla completa. Todo **cliente-only** (sin cambios en el daemon ni el protocolo).
+
+- **Máquina de modos + teclas coherentes:** `Esc` retrocede un nivel según el modo; `q` solo sale en Normal.
+  El pie muestra el **modo activo** (`[NORMAL]`/`[ZOOM]`/`[FILTRO]`/`[PAUSA+SCRUB]`/`[AYUDA]`) y las teclas
+  del contexto.
+- **Overlay de ayuda `?`** con todas las teclas agrupadas.
+- **Foco de panel `Tab`/`Shift+Tab` + zoom `Enter`** a pantalla completa (`Esc` vuelve).
+- **Selección de fila `j`/`k` · `↑`/`↓`** en el panel enfocado.
+- **Pausa + scrub (`p`, luego `←`/`→`):** recorre el gráfico segundo a segundo con un marcador sobre el
+  sparkline y lee el valor exacto de ese instante ("hace N s").
+- **Filtro `/`** incremental por panel (se limpia al cambiar de foco).
+- **Frescura del dato** en la cabecera (`dato: hace N s`, verde/ámbar/rojo).
+- **Reconexión resiliente** con backoff, sin perder el histórico ya pintado.
+- **Resaltado por umbral** (percentil 90 de la propia serie reciente).
+- **Fecha con año** en la cabecera (`jue 02 jul 2026 · 16:38:57`).
+- **Consistencia visual:** cabeceras y unidades uniformes; aviso de filas ocultas ("+N más — Enter para
+  expandir") en vez de recorte silencioso.
+
+Verificación: 113 tests verdes · `cargo clippy`/`fmt` limpios · `build --release` OK.
+
+## [0.5.3] — 2026-07-02
+
+### GUI
+
+- **Top 10 + scroll:** apps/servidores en vivo y apps histórico acotadas al top 10; interfaces ilimitadas con
+  scroll interno (mínimo 5 filas), sin agrandar el grid.
+- **Fix del scroll de `main`** (`min-height:0` en el flex item) que afectaba a las vistas En vivo e Histórico.
+- **Calendario propio** (`DateField.svelte` + `calendar.ts`) que reemplaza al `<input type=date>` nativo de
+  WebKitGTK (que cambiaba el valor al navegar mes/año y se cerraba en cada clic): navegar no cierra, clic-día
+  aplica+cierra, semana desde lunes (ISO 8601), etiquetas ES, sin futuro.
+
 ## [0.5.2] — 2026-07-01
 
 ### Corregido (GUI)

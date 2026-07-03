@@ -1,11 +1,12 @@
 //! Render puro del dashboard sobre un Frame de ratatui (testeable con TestBackend).
 
-use crate::live::state::LiveModel;
+use crate::live::state::{frescura, Focus, LiveModel, Mode, Nivel};
 use crate::render::format_units;
+use chrono::Datelike;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Row, Sparkline, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Sparkline, Table, Wrap};
 use ratatui::Frame;
 
 /// Dibuja el dashboard completo en 3 bandas:
@@ -14,6 +15,28 @@ use ratatui::Frame;
 pub fn draw(frame: &mut Frame, model: &LiveModel) {
     use ratatui::layout::{Constraint, Direction, Layout};
     let area = frame.area();
+
+    if model.mode == Mode::Zoom {
+        let bandas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // cabecera
+                Constraint::Min(3),    // panel enfocado a pantalla completa
+                Constraint::Length(1), // pie
+            ])
+            .split(area);
+        draw_header(frame, model, bandas[0]);
+        match model.focus {
+            Focus::Grafico => draw_charts(frame, model, bandas[1]),
+            Focus::AppsVivo => draw_apps(frame, model, bandas[1]),
+            Focus::IfacesVivo => draw_ifaces(frame, model, bandas[1]),
+            Focus::AppsHist => draw_hist_apps(frame, model, bandas[1]),
+            Focus::IfacesHist => draw_hist_ifaces(frame, model, bandas[1]),
+        }
+        draw_footer(frame, model, bandas[2]);
+        return;
+    }
+
     let con_historico = area.height >= 30;
 
     let constraints = if con_historico {
@@ -60,6 +83,124 @@ pub fn draw(frame: &mut Frame, model: &LiveModel) {
     } else {
         draw_footer(frame, model, bandas[3]);
     }
+
+    if model.mode == Mode::Ayuda {
+        draw_help_overlay(frame, area);
+    }
+}
+
+/// Etiqueta del modo activo, primer segmento del pie (§6.1). Para `Zoom` incluye
+/// el panel enfocado en minúsculas ("apps", "ifaces", "grafico").
+fn etiqueta_modo(mode: Mode, focus: Focus) -> String {
+    match mode {
+        Mode::Normal => "[NORMAL]".to_string(),
+        Mode::Zoom => {
+            let panel = match focus {
+                Focus::Grafico => "grafico",
+                Focus::AppsVivo | Focus::AppsHist => "apps",
+                Focus::IfacesVivo | Focus::IfacesHist => "ifaces",
+            };
+            format!("[ZOOM {panel}]")
+        }
+        Mode::Filtro => "[FILTRO]".to_string(),
+        Mode::PausaScrub => "[PAUSA+SCRUB]".to_string(),
+        Mode::Ayuda => "[AYUDA]".to_string(),
+    }
+}
+
+/// Segmentos del pie contextual: primero el indicador de modo (`etiqueta_modo`),
+/// luego las teclas relevantes al modo/foco actual, y siempre termina en "? ayuda"
+/// (Task 11). El texto exacto de las teclas globales (pausa/incluir lo/unidades) lo
+/// construye `draw_footer`, que sustituye el segmento correspondiente por el label
+/// dinámico de `model.units`; aquí se deja el marcador base para los tests puros.
+fn segmentos_pie(mode: Mode, focus: Focus) -> Vec<String> {
+    let mut segs = vec![etiqueta_modo(mode, focus)];
+    match mode {
+        Mode::Filtro => {
+            segs.push("Esc cancelar".to_string());
+            segs.push("Enter confirmar".to_string());
+        }
+        Mode::Zoom => {
+            segs.push("Esc volver".to_string());
+        }
+        Mode::PausaScrub => {
+            segs.push("←/→ mover cursor".to_string());
+            segs.push("Esc reanudar".to_string());
+        }
+        Mode::Ayuda => {
+            segs.push("Esc/? cerrar".to_string());
+        }
+        Mode::Normal => {
+            segs.push("Tab foco".to_string());
+            segs.push("Enter zoom".to_string());
+        }
+    }
+    segs.push("p pausa · a incluir lo · u unidades".to_string());
+    segs.push("? ayuda".to_string());
+    segs
+}
+
+/// Mapea el `Nivel` lógico (frescura del dato, resaltado por umbral) al color de
+/// terminal que lo representa. Verde=Green, Ambar=Yellow, Rojo=Red.
+fn color_nivel(n: Nivel) -> Color {
+    match n {
+        Nivel::Verde => Color::Green,
+        Nivel::Ambar => Color::Yellow,
+        Nivel::Rojo => Color::Red,
+    }
+}
+
+/// Popup modal centrado con todas las teclas de `keymap_activo()` (fuente única,
+/// state.rs). `Clear` limpia el área bajo el overlay para que no se vea el
+/// contenido de fondo a través de él.
+fn draw_help_overlay(frame: &mut Frame, area: Rect) {
+    let ancho = area.width.saturating_sub(10).clamp(20, 60);
+    let mapa = crate::live::state::keymap_activo();
+    let alto = (mapa.len() as u16 + 2).min(area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(ancho)) / 2,
+        y: area.y + (area.height.saturating_sub(alto)) / 2,
+        width: ancho,
+        height: alto,
+    };
+    frame.render_widget(Clear, popup);
+    let lineas: Vec<Line> = mapa
+        .iter()
+        .map(|(tecla, accion)| {
+            Line::from(vec![
+                Span::styled(
+                    format!("{tecla:<16}"),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(*accion),
+            ])
+        })
+        .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" ayuda · teclas ");
+    frame.render_widget(Paragraph::new(lineas).block(block), popup);
+}
+
+/// Fecha+hora localizada corta con año ("mié 02 jul 2026 · 16:38:57"); si `ancho`
+/// no da para la fecha, se acorta solo a la hora ("16:38:57"). `ahora` inyectado
+/// para determinismo en tests.
+const ANCHO_MIN_FECHA: u16 = 60;
+
+fn formatear_fecha_hora(ahora: chrono::DateTime<chrono::Local>, ancho: u16) -> String {
+    let hora = ahora.format("%H:%M:%S").to_string();
+    if ancho < ANCHO_MIN_FECHA {
+        return hora;
+    }
+    const DIAS: [&str; 7] = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+    const MESES: [&str; 12] = [
+        "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic",
+    ];
+    let dia = DIAS[ahora.weekday().num_days_from_monday() as usize];
+    let mes = MESES[ahora.month0() as usize];
+    format!("{dia} {:02} {mes} {} · {hora}", ahora.day(), ahora.year())
 }
 
 /// Cabecera de una línea: título, versión, estado eBPF, hora, conexión.
@@ -81,8 +222,17 @@ pub fn draw_header(frame: &mut Frame, model: &LiveModel, area: Rect) {
             Style::default().fg(Color::Red),
         )
     };
-    let hora = chrono::Local::now().format("%H:%M:%S").to_string();
+    let ahora = chrono::Local::now();
+    let hora = formatear_fecha_hora(ahora, area.width);
     let pausa = if model.paused { "  [PAUSA]" } else { "" };
+    let (nivel, texto_frescura) = match model.samples.last() {
+        Some(s) => frescura(s.ts, ahora.timestamp()),
+        None => (Nivel::Rojo, "sin datos".to_string()),
+    };
+    let dato = Span::styled(
+        format!("  dato: {texto_frescura}"),
+        Style::default().fg(color_nivel(nivel)),
+    );
     // ÍTEM 4 — versión y hora en DarkGray (secundario) para que eBPF y conexión destaquen.
     let line = Line::from(vec![
         Span::styled(" CaudalGhost ", Style::default().fg(Color::Cyan)),
@@ -93,6 +243,7 @@ pub fn draw_header(frame: &mut Frame, model: &LiveModel, area: Rect) {
         ebpf,
         Span::raw("  "),
         conexion,
+        dato,
         Span::styled(
             format!("  {hora}{pausa}"),
             Style::default().fg(Color::DarkGray),
@@ -115,6 +266,7 @@ fn draw_chart_one(
     flecha: &str,
     color: Color,
     units: crate::render::UnitMode,
+    scrub: Option<usize>,
 ) {
     let inner_w = area.width.saturating_sub(2) as usize;
     // ÍTEM 2 — Hint "acumulando…" cuando el gráfico aún no se ha llenado.
@@ -125,7 +277,26 @@ fn draw_chart_one(
         format_units(cur, units),
         format_units(peak, units)
     );
-    let title_line: Line = if serie.len() < inner_w {
+    let title_line: Line = if let Some(idx) = scrub {
+        // Valor exacto de la muestra bajo el cursor + marca relativa, sobre la
+        // rebanada visible (los últimos inner_w puntos, igual que fit_series).
+        let start = serie.len().saturating_sub(inner_w);
+        let visible = &serie[start..];
+        let valor = visible.get(idx).copied().unwrap_or(0);
+        let n_atras = visible.len().saturating_sub(1).saturating_sub(idx);
+        Line::from(vec![
+            Span::styled(base_title, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(
+                    "· cursor {}/s (hace {n_atras} s) ",
+                    format_units(valor, units)
+                ),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])
+    } else if serie.len() < inner_w {
         // El gráfico aún se está llenando (fit_series rellenó ceros a la izquierda).
         Line::from(vec![
             Span::styled(base_title, Style::default().add_modifier(Modifier::BOLD)),
@@ -145,6 +316,26 @@ fn draw_chart_one(
         .data(&fit)
         .style(Style::default().fg(color));
     frame.render_widget(spark, area);
+
+    // Marcador de scrub: 1 columna resaltada, superpuesta al Sparkline ya dibujado.
+    // scrub_idx indexa la rebanada VISIBLE (misma ventana que fit_series calcula).
+    if let (Some(idx), true) = (scrub, area.width > 2 && area.height > 2) {
+        let start = serie.len().saturating_sub(inner_w);
+        let visible_len = serie.len() - start;
+        // La columna del cursor dentro de `fit` (que ancla a la derecha, con ceros
+        // de relleno a la izquierda si la serie visible es más corta que inner_w).
+        let pad = inner_w.saturating_sub(visible_len);
+        let col = pad + idx.min(visible_len.saturating_sub(1));
+        if col < inner_w {
+            let x = area.x + 1 + col as u16;
+            let y = area.y + area.height.saturating_sub(2); // fila de barras, dentro del borde
+            let buf = frame.buffer_mut();
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_fg(Color::White);
+                cell.modifier.insert(Modifier::REVERSED);
+            }
+        }
+    }
 }
 
 /// Banda de gráficos: ↓ rx (izquierda, cyan) y ↑ tx (derecha, magenta), lado a lado.
@@ -160,6 +351,12 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
+    let scrub = if model.mode == Mode::PausaScrub {
+        model.scrub_idx
+    } else {
+        None
+    };
+
     draw_chart_one(
         frame,
         cols[0],
@@ -169,6 +366,7 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
         "↓",
         Color::Cyan,
         model.units,
+        scrub,
     );
     draw_chart_one(
         frame,
@@ -179,11 +377,14 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
         "↑",
         Color::Magenta,
         model.units,
+        scrub,
     );
 }
 
-/// Pie de una línea: ayuda de teclas a la izquierda y, si hay ancho, el tagline
-/// de marca a la derecha (corazón en el rojo de Parlox Network, #E3262E).
+/// Pie de una línea: indicador de modo + ayuda de teclas contextual (vía
+/// `segmentos_pie`, fuente única de verdad junto con `keymap_activo`) a la
+/// izquierda y, si hay ancho, el tagline de marca a la derecha (corazón en el
+/// rojo de Parlox Network, #E3262E).
 pub fn draw_footer(frame: &mut Frame, model: &LiveModel, area: Rect) {
     use ratatui::layout::{Alignment, Direction, Layout};
     // ÍTEM 3 — Micro-parpadeo: el segmento de la tecla activa va en blanco+BOLD durante
@@ -192,22 +393,36 @@ pub fn draw_footer(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .fg(Color::White)
         .add_modifier(Modifier::BOLD);
     let tenue = Style::default().fg(Color::DarkGray);
-    let est = |k: char| {
-        if model.flash_frames > 0 && model.flash_key == Some(k) {
+    // El pie es de una sola línea y de ancho limitado: de `segmentos_pie` solo se
+    // usan el indicador de modo (primero) y las teclas universales + "? ayuda"
+    // (últimos dos); los hints específicos de modo (p.ej. "Tab foco", "Esc volver")
+    // quedan para el overlay de ayuda completo (`keymap_activo`), que tiene espacio
+    // de sobra. El segmento de teclas globales lleva el label de unidades dinámico
+    // (p.ej. "u unidades: KiB"); el flash de una tecla resalta el segmento cuyo
+    // contenido la nombra en vez de un match manual por segmento fijo (Task 11).
+    let segs = segmentos_pie(model.mode, model.focus);
+    let modo = segs.first().cloned().unwrap_or_default();
+    let ayuda = segs.last().cloned().unwrap_or_default();
+    let universal = format!(
+        "p pausa · a incluir lo · u unidades: {}",
+        model.units.label()
+    );
+    let mut spans = vec![Span::styled(format!(" {modo}"), tenue)];
+    for texto in ["q/Esc salir".to_string(), universal, ayuda] {
+        let estilo = if model.flash_frames > 0
+            && model
+                .flash_key
+                .is_some_and(|k| texto.contains(&format!("{k} ")) || texto.starts_with(k))
+        {
             bold_blanco
         } else {
             tenue
-        }
-    };
-    let comandos = Paragraph::new(Line::from(vec![
-        Span::styled(" q/Esc salir · ", tenue),
-        Span::styled("p pausa", est('p')),
-        Span::styled(" · ", tenue),
-        Span::styled("a incluir lo", est('a')),
-        Span::styled(" · ", tenue),
-        Span::styled(format!("u unidades: {}", model.units.label()), est('u')),
-        Span::styled(" ", tenue),
-    ]));
+        };
+        spans.push(Span::styled(" · ", tenue));
+        spans.push(Span::styled(texto, estilo));
+    }
+    spans.push(Span::styled(" ", tenue));
+    let comandos = Paragraph::new(Line::from(spans));
 
     // El tagline solo se muestra si la terminal es lo bastante ancha para no
     // pisar los comandos (≈57 cols) + el tagline (32) + respiro; en pantallas
@@ -230,11 +445,41 @@ pub fn draw_footer(frame: &mut Frame, model: &LiveModel, area: Rect) {
     }
 }
 
+/// Título estándar de panel: ` nombre · ámbito ` y, si `extra` trae algo
+/// (p.ej. `filtro: xyz`), lo añade como ` · extra ` antes del espacio final.
+/// Fuente única de verdad para los títulos de panel (apps/interfaces, vivo/histórico).
+fn titulo_panel(nombre: &str, ambito: &str, extra: Option<&str>) -> String {
+    match extra {
+        Some(e) if !e.is_empty() => format!(" {nombre} · {ambito} · {e} "),
+        _ => format!(" {nombre} · {ambito} "),
+    }
+}
+
+/// Reconstruye la serie reciente (rx+tx por muestra, ventana `PANEL_WINDOW_SECS`) de una
+/// app dada, para poder calcular su `nivel_umbral`. `top_apps()` no trae serie por app.
+fn serie_app(model: &LiveModel, nombre: &str) -> Vec<u64> {
+    let start = model
+        .samples
+        .len()
+        .saturating_sub(crate::live::state::PANEL_WINDOW_SECS);
+    model.samples[start..]
+        .iter()
+        .map(|s| {
+            s.apps
+                .iter()
+                .find(|a| a.app == nombre)
+                .map(|a| a.rx + a.tx)
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
 /// Panel de top apps con barras inline. Si eBPF inactivo, aviso honesto.
 pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" top apps · ahora ");
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::AppsVivo;
+    let extra = filtro_activo.then(|| format!("filtro: {}", model.filtro));
+    let titulo = titulo_panel("top apps", "ahora", extra.as_deref());
+    let block = Block::default().borders(Borders::ALL).title(titulo);
     if !model.ebpf {
         let aviso = Paragraph::new(Line::from(Span::styled(
             "eBPF inactivo — corre el daemon con sudo para ver apps",
@@ -245,37 +490,77 @@ pub fn draw_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         frame.render_widget(aviso, area);
         return;
     }
-    let apps = model.top_apps();
+    let apps: Vec<(String, u64, u64)> = model
+        .top_apps()
+        .into_iter()
+        .filter(|(app, _, _)| {
+            !filtro_activo || crate::live::state::nombre_coincide(app, &model.filtro)
+        })
+        .collect();
     let secs = model
         .samples
         .len()
         .clamp(1, crate::live::state::PANEL_WINDOW_SECS) as u64;
     let max = apps.iter().map(|(_, rx, tx)| rx + tx).max().unwrap_or(0);
+    let enfocado = model.focus == Focus::AppsVivo;
+    // Aviso de filas ocultas: si hay más apps que espacio visible, se reserva la
+    // última fila visible para "+N más — Enter para expandir" (Task 11).
+    // -2 por los bordes, -1 por la fila de encabezado ("app ↓ ↑").
+    let visibles = area.height.saturating_sub(3) as usize;
+    let total_apps = apps.len();
+    let ocultas = total_apps.saturating_sub(visibles);
+    let filas_a_mostrar = if ocultas > 0 {
+        visibles.saturating_sub(1)
+    } else {
+        visibles
+    };
     // ÍTEM 4 — Fila #1 (mayor tráfico) en BOLD para guiar el ojo. Sutil — solo la primera.
-    let rows: Vec<Row> = apps
+    // Si el panel tiene el foco, la fila seleccionada (selected_row) se resalta en reverse.
+    let mut rows: Vec<Row> = apps
         .iter()
-        .take(area.height.saturating_sub(2) as usize)
+        .take(filas_a_mostrar)
         .enumerate()
         .map(|(i, (app, rx, tx))| {
             let total = rx + tx;
             let barra = barra_inline(total, max, 10);
             let row = Row::new(vec![
                 app.clone(),
-                format!("{}/s", format_units(rx / secs, model.units)),
-                format!("{}/s", format_units(tx / secs, model.units)),
+                crate::render::format_rate(rx / secs, model.units),
+                crate::render::format_rate(tx / secs, model.units),
                 barra,
             ]);
-            if i == 0 {
-                row.style(Style::default().add_modifier(Modifier::BOLD))
+            let serie = serie_app(model, app);
+            let actual = serie.last().copied().unwrap_or(0);
+            let nivel = crate::live::state::nivel_umbral(&serie, actual);
+            let mut row_style = if i == 0 {
+                Style::default().add_modifier(Modifier::BOLD)
             } else {
-                row
+                Style::default()
+            };
+            if nivel != Nivel::Verde {
+                row_style = row_style.fg(color_nivel(nivel));
             }
+            if enfocado && i == model.selected_row {
+                row_style = row_style.add_modifier(Modifier::REVERSED);
+            }
+            row.style(row_style)
         })
         .collect();
+    if ocultas > 0 {
+        rows.push(
+            Row::new(vec![
+                format!("+{ocultas} más — Enter para expandir"),
+                String::new(),
+                String::new(),
+                String::new(),
+            ])
+            .style(Style::default().fg(Color::DarkGray)),
+        );
+    }
     let table = Table::new(
         rows,
         [
-            Constraint::Min(12),
+            Constraint::Min(20),
             Constraint::Length(11),
             Constraint::Length(11),
             Constraint::Length(11),
@@ -331,6 +616,8 @@ fn segmentos_franja(valores: &[u64], ancho: usize) -> Vec<(usize, usize)> {
 
 /// Dibuja un panel de histórico: Block con franja de proporción arriba y
 /// tabla (nombre coloreado / ↓ / ↑ / total / %) abajo. `items` ya ordenado desc.
+/// `seleccionado` = índice de la fila resaltada en reverse (Some solo si el panel
+/// tiene el foco de navegación); None => sin resaltado.
 fn draw_hist_panel(
     frame: &mut Frame,
     area: Rect,
@@ -338,6 +625,7 @@ fn draw_hist_panel(
     col_nombre: &str,
     items: &[(String, u64, u64)], // (nombre, rx, tx), ordenado desc por rx+tx
     units: crate::render::UnitMode,
+    seleccionado: Option<usize>,
 ) {
     use ratatui::layout::{Direction, Layout};
     let block = Block::default()
@@ -365,10 +653,20 @@ fn draw_hist_panel(
         .collect();
     frame.render_widget(Paragraph::new(Line::from(spans)), partes[0]);
 
-    // Tabla con % y nombre coloreado
-    let rows: Vec<Row> = items
+    // Tabla con % y nombre coloreado. Aviso de filas ocultas: si hay más items que
+    // espacio visible, se reserva la última fila visible para "+N más — Enter para
+    // expandir" (Task 11).
+    let visibles = partes[1].height.saturating_sub(1) as usize; // -1 por el header
+    let total_items = items.len();
+    let ocultas = total_items.saturating_sub(visibles);
+    let filas_a_mostrar = if ocultas > 0 {
+        visibles.saturating_sub(1)
+    } else {
+        visibles
+    };
+    let mut rows: Vec<Row> = items
         .iter()
-        .take(partes[1].height.saturating_sub(1) as usize) // -1 por el header
+        .take(filas_a_mostrar)
         .enumerate()
         .map(|(i, (nombre, rx, tx))| {
             let t = rx + tx;
@@ -377,7 +675,7 @@ fn draw_hist_panel(
             } else {
                 t as f64 / total as f64 * 100.0
             };
-            Row::new(vec![
+            let row = Row::new(vec![
                 ratatui::widgets::Cell::from(Span::styled(
                     nombre.clone(),
                     Style::default().fg(color_entidad(i)),
@@ -386,9 +684,26 @@ fn draw_hist_panel(
                 ratatui::widgets::Cell::from(format_units(*tx, units)),
                 ratatui::widgets::Cell::from(format_units(t, units)),
                 ratatui::widgets::Cell::from(format!("{pct:.1}%")),
-            ])
+            ]);
+            if seleccionado == Some(i) {
+                row.style(Style::default().add_modifier(Modifier::REVERSED))
+            } else {
+                row
+            }
         })
         .collect();
+    if ocultas > 0 {
+        rows.push(
+            Row::new(vec![
+                ratatui::widgets::Cell::from(format!("+{ocultas} más — Enter para expandir")),
+                ratatui::widgets::Cell::from(""),
+                ratatui::widgets::Cell::from(""),
+                ratatui::widgets::Cell::from(""),
+                ratatui::widgets::Cell::from(""),
+            ])
+            .style(Style::default().fg(Color::DarkGray)),
+        );
+    }
     let table = Table::new(
         rows,
         [
@@ -409,9 +724,10 @@ fn draw_hist_panel(
 /// Panel de histórico de apps: totales acumulados, orden desc. Aviso si eBPF inactivo.
 pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
     if !model.ebpf {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" apps · histórico ");
+        let block =
+            Block::default()
+                .borders(Borders::ALL)
+                .title(titulo_panel("apps", "histórico", None));
         let aviso = Paragraph::new(Line::from(Span::styled(
             "eBPF inactivo — corre el daemon con sudo para ver apps",
             Style::default().fg(Color::Yellow),
@@ -427,13 +743,19 @@ pub fn draw_hist_apps(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .map(|r| (r.app.clone(), r.rx, r.tx))
         .collect();
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
+    let enfocado = model.focus == Focus::AppsHist;
+    let seleccionado = enfocado.then_some(model.selected_row);
+    let extra = (enfocado && !items.is_empty())
+        .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
+    let titulo = titulo_panel("apps", "histórico", extra.as_deref());
     draw_hist_panel(
         frame,
         area,
-        " apps · histórico ",
+        &titulo,
         "app",
         &items,
         model.units,
+        seleccionado,
     );
 }
 
@@ -446,51 +768,99 @@ pub fn draw_hist_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
         .map(|r| (r.iface.clone(), r.rx, r.tx))
         .collect();
     items.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
+    let enfocado = model.focus == Focus::IfacesHist;
+    let seleccionado = enfocado.then_some(model.selected_row);
+    let extra = (enfocado && !items.is_empty())
+        .then(|| format!("sel {}/{}", model.selected_row + 1, items.len()));
+    let titulo = titulo_panel("interfaces", "histórico", extra.as_deref());
     draw_hist_panel(
         frame,
         area,
-        " interfaces · histórico ",
+        &titulo,
         "iface",
         &items,
         model.units,
+        seleccionado,
     );
 }
 
 /// Panel de interfaces con tasas, sparkline y (si existe) IP en gris indentada.
 pub fn draw_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" interfaces · ahora ");
+    let filtro_activo = !model.filtro.is_empty() && model.focus == Focus::IfacesVivo;
+    let extra = filtro_activo.then(|| format!("filtro: {}", model.filtro));
+    let titulo = titulo_panel("interfaces", "ahora", extra.as_deref());
+    let block = Block::default().borders(Borders::ALL).title(titulo);
     let secs = model
         .samples
         .len()
         .clamp(1, crate::live::state::PANEL_WINDOW_SECS) as u64;
     let max_lines = area.height.saturating_sub(2) as usize; // dentro de los bordes
     let mut lines: Vec<Line> = Vec::new();
+    let enfocado = model.focus == Focus::IfacesVivo;
+    let filas: Vec<_> = model
+        .iface_rows()
+        .into_iter()
+        .filter(|(iface, _, _, _)| {
+            !filtro_activo || crate::live::state::nombre_coincide(iface, &model.filtro)
+        })
+        .collect();
+    // Aviso de filas ocultas: cada interfaz ocupa 1 línea (o 2 si tiene IP). Si al
+    // menos una no cabe en el espacio visible, se reserva la última línea visible
+    // para "+N más — Enter para expandir" (Task 11, mismo patrón que draw_apps/
+    // draw_hist_panel) en vez de recortar en silencio.
+    let lineas_por_fila: Vec<usize> = filas
+        .iter()
+        .map(|(iface, _, _, _)| 1 + usize::from(model.iface_ips.contains_key(iface)))
+        .collect();
+    let cabe_todo = lineas_por_fila.iter().sum::<usize>() <= max_lines;
+    let limite_lineas = if cabe_todo {
+        max_lines
+    } else {
+        max_lines.saturating_sub(1)
+    };
+    let mut visibles = 0usize;
+    let mut acumulado = 0usize;
+    for &n in &lineas_por_fila {
+        if acumulado + n > limite_lineas {
+            break;
+        }
+        acumulado += n;
+        visibles += 1;
+    }
+    let ocultas = filas.len() - visibles;
     // ÍTEM 4 — Fila #1 (mayor tráfico) en BOLD para guiar el ojo.
-    for (row_idx, (iface, rx, tx, serie)) in model.iface_rows().iter().enumerate() {
-        if lines.len() >= max_lines {
+    // Si el panel tiene el foco, la fila seleccionada (selected_row) se resalta en reverse.
+    for (row_idx, (iface, rx, tx, serie)) in filas.iter().enumerate() {
+        if lines.len() >= limite_lineas {
             break;
         }
         let spark = crate::render::sparkline(&fit_series(serie, 8));
-        let row_style = if row_idx == 0 {
+        let actual = serie.last().copied().unwrap_or(0);
+        let nivel = crate::live::state::nivel_umbral(serie, actual);
+        let mut row_style = if row_idx == 0 {
             Style::default().add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
+        if nivel != Nivel::Verde {
+            row_style = row_style.fg(color_nivel(nivel));
+        }
+        if enfocado && row_idx == model.selected_row {
+            row_style = row_style.add_modifier(Modifier::REVERSED);
+        }
         let datos = Line::from(vec![
             Span::styled(format!("{:<8} ", recorta(iface, 8)), row_style),
             Span::styled(
                 format!(
                     "{:>10} ",
-                    format!("{}/s", format_units(rx / secs, model.units))
+                    crate::render::format_rate(rx / secs, model.units)
                 ),
                 row_style,
             ),
             Span::styled(
                 format!(
                     "{:>10} ",
-                    format!("{}/s", format_units(tx / secs, model.units))
+                    crate::render::format_rate(tx / secs, model.units)
                 ),
                 row_style,
             ),
@@ -498,13 +868,19 @@ pub fn draw_ifaces(frame: &mut Frame, model: &LiveModel, area: Rect) {
         ]);
         lines.push(datos);
         if let Some(ip) = model.iface_ips.get(iface) {
-            if lines.len() < max_lines {
+            if lines.len() < limite_lineas {
                 lines.push(Line::from(Span::styled(
                     format!("   {ip}"),
                     Style::default().fg(Color::DarkGray),
                 )));
             }
         }
+    }
+    if ocultas > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("+{ocultas} más — Enter para expandir"),
+            Style::default().fg(Color::DarkGray),
+        )));
     }
     let para = Paragraph::new(lines).block(block);
     frame.render_widget(para, area);
@@ -552,7 +928,12 @@ mod tests {
         draw_ifaces,
     };
     use crate::live::state::LiveModel;
-    use ratatui::{backend::TestBackend, layout::Rect, style::Color, Terminal};
+    use ratatui::{
+        backend::TestBackend,
+        layout::Rect,
+        style::{Color, Modifier},
+        Terminal,
+    };
 
     fn render_area(
         model: &LiveModel,
@@ -640,6 +1021,72 @@ mod tests {
     }
 
     #[test]
+    fn titulo_panel_con_y_sin_extra() {
+        use super::titulo_panel;
+        assert_eq!(titulo_panel("apps", "ahora", None).trim(), "apps · ahora");
+        assert_eq!(
+            titulo_panel("apps", "ahora", Some("filtro: fire")).trim(),
+            "apps · ahora · filtro: fire"
+        );
+    }
+
+    #[test]
+    fn segmentos_pie_termina_en_ayuda() {
+        use super::segmentos_pie;
+        use crate::live::state::{Focus, Mode};
+        let segs = segmentos_pie(Mode::Normal, Focus::Grafico);
+        assert_eq!(segs.last().map(String::as_str), Some("? ayuda"));
+        assert!(segs.iter().any(|s| s.contains("[NORMAL]")), "{segs:?}");
+    }
+
+    #[test]
+    fn pie_muestra_indicador_de_modo_normal() {
+        let m = LiveModel::default();
+        let s = render_area(&m, 80, 1, draw_footer);
+        assert!(s.contains("[NORMAL]"), "{s:?}");
+    }
+
+    #[test]
+    fn apps_avisa_filas_ocultas_cuando_hay_mas_de_las_visibles() {
+        let mut m = LiveModel {
+            ebpf: true,
+            ..Default::default()
+        };
+        let apps: Vec<(&str, u64, u64)> = (0..15)
+            .map(|i| {
+                (
+                    Box::leak(format!("app{i}").into_boxed_str()) as &str,
+                    100,
+                    10,
+                )
+            })
+            .collect();
+        m.samples = vec![crate::live::state::tests_support::sample_apps(0, &apps)];
+        // área baja: solo caben ~8 filas de las 15
+        let s = render_area(&m, 50, 10, draw_apps);
+        assert!(s.contains("más"), "debe avisar filas ocultas: {s:?}");
+        assert!(s.contains("Enter"), "debe indicar cómo expandir: {s:?}");
+    }
+
+    #[test]
+    fn hist_apps_avisa_filas_ocultas() {
+        use caudalghost_core::proto::AppRow;
+        let m = LiveModel {
+            ebpf: true,
+            hist_apps: (0..15)
+                .map(|i| AppRow {
+                    app: format!("app{i}"),
+                    rx: (15 - i) as u64 * 1000,
+                    tx: 10,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let s = render_area(&m, 50, 8, draw_hist_apps);
+        assert!(s.contains("más"), "debe avisar filas ocultas: {s:?}");
+    }
+
+    #[test]
     fn charts_lado_a_lado_muestran_ambas_flechas() {
         let m = LiveModel {
             show_all: false,
@@ -674,6 +1121,28 @@ mod tests {
         )];
         let s = render_area(&m, 50, 10, draw_apps);
         assert!(s.contains("firefox") && s.contains("curl"));
+    }
+
+    #[test]
+    fn panel_apps_filtrado_muestra_solo_coincidencias() {
+        use crate::live::state::Focus;
+        let mut m = LiveModel {
+            ebpf: true,
+            focus: Focus::AppsVivo,
+            filtro: "fire".into(),
+            ..Default::default()
+        };
+        m.samples = vec![crate::live::state::tests_support::sample_apps(
+            0,
+            &[("firefox", 100, 10), ("curl", 5, 5)],
+        )];
+        let s = render_area(&m, 50, 10, draw_apps);
+        assert!(s.contains("firefox"), "coincide con el filtro: {s:?}");
+        assert!(!s.contains("curl"), "no coincide, debe quedar fuera: {s:?}");
+        assert!(
+            s.contains("filtro: fire"),
+            "título muestra el filtro: {s:?}"
+        );
     }
 
     #[test]
@@ -720,6 +1189,28 @@ mod tests {
         };
         let s = render_area(&m, 50, 10, draw_ifaces);
         assert!(s.contains("eth0"));
+    }
+
+    #[test]
+    fn ifaces_avisa_filas_ocultas_cuando_hay_mas_de_las_visibles() {
+        let ifaces: Vec<(&str, u64, u64)> = (0..15)
+            .map(|i| {
+                (
+                    Box::leak(format!("eth{i}").into_boxed_str()) as &str,
+                    100,
+                    10,
+                )
+            })
+            .collect();
+        let m = LiveModel {
+            show_all: true,
+            samples: vec![crate::live::state::tests_support::sample(0, &ifaces)],
+            ..Default::default()
+        };
+        // área baja: solo caben unas pocas filas de las 15 interfaces
+        let s = render_area(&m, 50, 10, draw_ifaces);
+        assert!(s.contains("más"), "debe avisar filas ocultas: {s:?}");
+        assert!(s.contains("Enter"), "debe indicar cómo expandir: {s:?}");
     }
 
     #[test]
@@ -838,6 +1329,74 @@ mod tests {
         assert!(
             pos_mega < pos_claude,
             "megasync (mayor) debe ir primero: {s:?}"
+        );
+    }
+
+    #[test]
+    fn hist_apps_titulo_muestra_seleccion_via_titulo_panel_cuando_enfocado() {
+        use crate::live::state::Focus;
+        use caudalghost_core::proto::AppRow;
+        let m = LiveModel {
+            ebpf: true,
+            focus: Focus::AppsHist,
+            selected_row: 1,
+            hist_apps: vec![
+                AppRow {
+                    app: "claude".into(),
+                    rx: 1_000_000,
+                    tx: 100,
+                },
+                AppRow {
+                    app: "megasync".into(),
+                    rx: 50_000_000,
+                    tx: 2000,
+                },
+            ],
+            ..Default::default()
+        };
+        let s = render_area(&m, 50, 8, draw_hist_apps);
+        assert!(
+            s.contains("sel 2/2"),
+            "titulo_panel debe exponer sel N/M: {s:?}"
+        );
+        // sin foco, no debe aparecer el hueco de selección
+        let m2 = LiveModel {
+            ebpf: true,
+            focus: Focus::Grafico,
+            selected_row: 1,
+            hist_apps: m.hist_apps.clone(),
+            ..Default::default()
+        };
+        let s2 = render_area(&m2, 50, 8, draw_hist_apps);
+        assert!(!s2.contains("sel "), "sin foco no hay sel N/M: {s2:?}");
+    }
+
+    #[test]
+    fn hist_ifaces_titulo_muestra_seleccion_via_titulo_panel_cuando_enfocado() {
+        use crate::live::state::Focus;
+        use caudalghost_core::proto::TotalRow;
+        let m = LiveModel {
+            show_all: true,
+            focus: Focus::IfacesHist,
+            selected_row: 0,
+            hist_ifaces: vec![
+                TotalRow {
+                    iface: "wlp2s0".into(),
+                    rx: 45_000_000_000,
+                    tx: 600_000,
+                },
+                TotalRow {
+                    iface: "lo".into(),
+                    rx: 999,
+                    tx: 999,
+                },
+            ],
+            ..Default::default()
+        };
+        let s = render_area(&m, 50, 8, draw_hist_ifaces);
+        assert!(
+            s.contains("sel 1/2"),
+            "titulo_panel debe exponer sel N/M: {s:?}"
         );
     }
 
@@ -1055,6 +1614,7 @@ mod tests {
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
+                    None,
                 )
             })
             .unwrap();
@@ -1080,12 +1640,112 @@ mod tests {
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
+                    None,
                 )
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let s: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(!s.contains("acumulando"), "serie larga → sin hint: {s:?}");
+    }
+
+    #[test]
+    fn chart_con_scrub_pinta_marcador_de_una_columna() {
+        // serie de 5 puntos, ancho interior sobra de sobra (no rellena) → 1 columna por muestra
+        let serie = vec![1u64, 2, 3, 4, 5];
+        let backend = ratatui::backend::TestBackend::new(20, 6);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                super::draw_chart_one(
+                    f,
+                    area,
+                    &serie,
+                    5,
+                    5,
+                    "↓",
+                    Color::Cyan,
+                    crate::render::UnitMode::Binary,
+                    Some(2), // cursor en la muestra del medio
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        // inner_w = area.width - 2 = 18; serie de 5 puntos → fit_series rellena 13 ceros a la
+        // izquierda; el índice visible 2 (de 0..5) cae en la columna 13 + 2 = 15 del inner,
+        // es decir x = area.x + 1 (borde) + 15 = 16 dentro del buffer.
+        let area = ratatui::layout::Rect::new(0, 0, 20, 6);
+        let x_cursor = area.x + 1 + 15;
+        let y_dato = area.y + area.height - 2; // fila de datos del sparkline (dentro del borde)
+        let celda = buf.cell((x_cursor, y_dato)).unwrap();
+        assert!(
+            celda.style().fg == Some(Color::White) || celda.modifier.contains(Modifier::REVERSED),
+            "la columna del cursor debe resaltarse (blanco o reverse): {:?}",
+            celda.style()
+        );
+    }
+
+    #[test]
+    fn chart_con_scrub_titulo_muestra_valor_bajo_el_cursor() {
+        let serie = vec![10u64, 20, 30];
+        let backend = ratatui::backend::TestBackend::new(60, 6);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                super::draw_chart_one(
+                    f,
+                    f.area(),
+                    &serie,
+                    30,
+                    30,
+                    "↓",
+                    Color::Cyan,
+                    crate::render::UnitMode::Binary,
+                    Some(1), // cursor en el valor 20 (visible, ya que serie < inner_w rellena ceros)
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            s.contains("20 B"),
+            "el título debe mostrar el valor exacto bajo el cursor: {s:?}"
+        );
+        assert!(
+            s.contains("hace"),
+            "el título debe mostrar la marca relativa: {s:?}"
+        );
+    }
+
+    #[test]
+    fn chart_sin_scrub_no_pinta_marcador_ni_cambia_titulo() {
+        let serie = vec![1u64, 2, 3, 4, 5];
+        let s = {
+            let backend = ratatui::backend::TestBackend::new(20, 6);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| {
+                    super::draw_chart_one(
+                        f,
+                        f.area(),
+                        &serie,
+                        5,
+                        5,
+                        "↓",
+                        Color::Cyan,
+                        crate::render::UnitMode::Binary,
+                        None,
+                    )
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            buf.content().iter().map(|c| c.symbol()).collect::<String>()
+        };
+        assert!(
+            !s.contains("hace"),
+            "sin scrub, sin marca relativa en el título: {s:?}"
+        );
     }
 
     #[test]
@@ -1111,6 +1771,41 @@ mod tests {
     }
 
     #[test]
+    fn etiqueta_modo_por_cada_modo() {
+        use super::etiqueta_modo;
+        use crate::live::state::{Focus, Mode};
+        assert_eq!(etiqueta_modo(Mode::Normal, Focus::Grafico), "[NORMAL]");
+        assert_eq!(etiqueta_modo(Mode::Zoom, Focus::AppsVivo), "[ZOOM apps]");
+        assert_eq!(etiqueta_modo(Mode::Filtro, Focus::Grafico), "[FILTRO]");
+        assert_eq!(
+            etiqueta_modo(Mode::PausaScrub, Focus::Grafico),
+            "[PAUSA+SCRUB]"
+        );
+        assert_eq!(etiqueta_modo(Mode::Ayuda, Focus::Grafico), "[AYUDA]");
+    }
+
+    #[test]
+    fn overlay_ayuda_renderiza_sin_panico_y_lista_teclas() {
+        use crate::live::state::{keymap_activo, Mode};
+        let m = LiveModel {
+            mode: Mode::Ayuda,
+            connected: true,
+            ..Default::default()
+        };
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &m)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        for (tecla, _accion) in keymap_activo() {
+            assert!(
+                s.contains(tecla),
+                "el overlay debe listar la tecla {tecla:?}: {s:?}"
+            );
+        }
+    }
+
+    #[test]
     fn hist_muestra_columna_porcentaje_y_franja() {
         use caudalghost_core::proto::TotalRow;
         let m = LiveModel {
@@ -1133,5 +1828,127 @@ mod tests {
         assert!(s.contains('%'), "debe haber columna de %: {s:?}");
         assert!(s.contains("78.0%"), "wlp2s0 = 78%: {s:?}");
         assert!(s.contains('█'), "debe haber franja de proporción: {s:?}");
+    }
+
+    #[test]
+    fn smoke_render_zoom_no_panica_en_los_cinco_focos_y_omite_lo_no_enfocado() {
+        use crate::live::state::{Focus, Mode};
+        let focos = [
+            Focus::Grafico,
+            Focus::AppsVivo,
+            Focus::IfacesVivo,
+            Focus::AppsHist,
+            Focus::IfacesHist,
+        ];
+        for f in focos {
+            let mut m = LiveModel {
+                version: "0.6.0".into(),
+                ebpf: true,
+                connected: true,
+                mode: Mode::Zoom,
+                focus: f,
+                ..Default::default()
+            };
+            m.samples = vec![crate::live::state::tests_support::sample(
+                0,
+                &[("eth0", 1024, 512)],
+            )];
+            m.hist_apps = vec![caudalghost_core::proto::AppRow {
+                app: "megasync".into(),
+                rx: 9_000_000,
+                tx: 100,
+            }];
+            m.hist_ifaces = vec![caudalghost_core::proto::TotalRow {
+                iface: "eth0".into(),
+                rx: 9_000_000,
+                tx: 100,
+            }];
+            let backend = ratatui::backend::TestBackend::new(100, 40);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|frame| super::draw(frame, &m)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+            assert!(
+                s.contains("CaudalGhost"),
+                "cabecera siempre visible: {f:?} {s:?}"
+            );
+            match f {
+                Focus::Grafico => assert!(
+                    s.contains("acumulando") || s.contains("KiB") || s.contains('↓'),
+                    "{f:?} {s:?}"
+                ),
+                Focus::AppsVivo | Focus::AppsHist => {
+                    assert!(s.to_lowercase().contains("app"), "{f:?} {s:?}")
+                }
+                Focus::IfacesVivo | Focus::IfacesHist => {
+                    assert!(s.contains("eth0"), "{f:?} {s:?}")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn draw_en_pausa_scrub_con_indice_fijo_no_panica() {
+        use crate::live::state::Mode;
+        let m = LiveModel {
+            version: "0.1.0".into(),
+            ebpf: true,
+            connected: true,
+            mode: Mode::PausaScrub,
+            paused: true,
+            scrub_idx: Some(0),
+            samples: vec![
+                crate::live::state::tests_support::sample(0, &[("eth0", 1024, 512)]),
+                crate::live::state::tests_support::sample(1, &[("eth0", 2048, 1024)]),
+            ],
+            ..Default::default()
+        };
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &m)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(s.contains("CaudalGhost"), "cabecera presente: {s:?}");
+        assert!(
+            s.contains("cursor"),
+            "título del gráfico muestra el cursor: {s:?}"
+        );
+    }
+
+    #[test]
+    fn formatear_fecha_hora_ancho_holgado_incluye_fecha_con_año() {
+        use chrono::TimeZone;
+        let ahora = chrono::Local
+            .with_ymd_and_hms(2026, 7, 2, 16, 38, 57)
+            .unwrap();
+        let s = super::formatear_fecha_hora(ahora, 80);
+        // 2026-07-02 es jueves (verificado con `date -d 2026-07-02 +%A`); el plan
+        // original decía "mié", que no corresponde a esa fecha real.
+        assert_eq!(s, "jue 02 jul 2026 · 16:38:57");
+    }
+
+    #[test]
+    fn formatear_fecha_hora_ancho_estrecho_solo_hora() {
+        use chrono::TimeZone;
+        let ahora = chrono::Local
+            .with_ymd_and_hms(2026, 7, 2, 16, 38, 57)
+            .unwrap();
+        let s = super::formatear_fecha_hora(ahora, 40);
+        assert_eq!(s, "16:38:57");
+    }
+
+    #[test]
+    fn cabecera_muestra_fecha_con_año_en_ancho_holgado() {
+        let m = LiveModel {
+            version: "0.1.0".into(),
+            ebpf: true,
+            connected: true,
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 1, draw_header);
+        assert!(
+            s.contains("2026"),
+            "debe incluir el año en ancho holgado: {s:?}"
+        );
     }
 }
