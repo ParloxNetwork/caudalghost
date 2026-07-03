@@ -2,6 +2,34 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.7.1] — 2026-07-03
+
+### CLI — pulido
+
+Pulido de las asperezas de 0.7.0 (cliente-only, sin tocar el daemon ni el protocolo).
+
+- **Contrato JSON unificado en toda la CLI:** `now` y `ping` pasan por la misma capa de salida que
+  `total/top/hosts`. Su `-o json` deja de ser el "sobre" crudo del `Response` y lleva `"schema": 1` como el
+  resto. Además `now` ya soporta **`-o csv` y `-o ndjson`** (una fila por interfaz); `-o table` conserva el
+  sparkline y la media por segundo. `ping` sigue en `table`/`json` (no es tabular → `csv`/`ndjson` dan error
+  claro). Cierra la nota "queda para 0.7.1" del changelog de 0.7.0.
+- **`--version` con contexto de build:** muestra versión + hash corto de git + fecha
+  (p. ej. `caudalghost 0.7.1 (a1b2c3d 2026-07-03)`), vía un `build.rs` nuevo que degrada a `desconocido`
+  sin git y no rompe el build.
+- **Flags de salida acotados a los comandos donde aplican:** `-o/--output`, `-u/--units`, `--json`,
+  `-q/--quiet` y `--no-color` se aplanan (`clap::Args`) en `ping/now/total/top/hosts` y **dejan de aparecer
+  en `live --help`** (la TUI los ignoraba). `--socket` sigue siendo global.
+- **Aviso en `hosts --app <X>` sin datos:** en tabla imprime `sin datos para la app '<X>' en el rango <R>`
+  en vez de una tabla vacía; en `json/csv/ndjson` la salida sigue vacía (lista vacía válida para scripts).
+
+#### Correcciones
+
+- **`hosts --app <inexistente> -o ndjson`** emitía un `\n` colgado (1 byte) en vez de salida vacía;
+  ahora son **0 bytes** exactos (NDJSON limpio para pipelines).
+- **`-n/--limit <N>` ahora aplica a `json/csv/ndjson`,** no solo a la tabla: los formatos máquina emiten
+  las N primeras filas. La fila `Σ total` de la tabla sigue sumando **todas** las filas del rango (total
+  real), no solo las N mostradas.
+
 ## [0.7.0] — 2026-07-03
 
 ### CLI (comandos de un-disparo: `ping/now/total/top/hosts`)

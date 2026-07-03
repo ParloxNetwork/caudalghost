@@ -189,11 +189,12 @@ fn csv_campo(s: &str) -> String {
 /// Punto único de salida: despacha por `fmt` (tabla/JSON/CSV/NDJSON),
 /// respetando `quiet` (omite título/decoración) y `color`.
 ///
-/// `limit`, si viene, acota cuántas filas se **muestran** en la tabla (las
-/// primeras `limit`, tras el orden ya aplicado por el llamante) — pero la
-/// fila `Σ total` siempre suma TODAS las filas recibidas en `filas`, no solo
-/// las mostradas, para que no sea un subtotal disfrazado de total. `limit`
-/// solo afecta al render de tabla; JSON/CSV/NDJSON emiten todas las filas.
+/// `limit`, si viene, acota cuántas filas se emiten en **todos** los formatos
+/// (las primeras `limit`, tras el orden ya aplicado por el llamante): la tabla
+/// muestra solo esas, y JSON/CSV/NDJSON serializan solo esas. La única
+/// excepción es la fila `Σ total` de la tabla, que siempre suma TODAS las filas
+/// recibidas en `filas`, no solo las mostradas, para que no sea un subtotal
+/// disfrazado de total.
 pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
     filas: &[T],
     fmt: Formato,
@@ -203,6 +204,10 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
     titulo_txt: &str,
     limit: Option<usize>,
 ) -> String {
+    // `limit` acota las filas mostradas/emitidas en TODOS los formatos. En Table la fila
+    // `Σ total` sigue sumando TODAS (total real); los formatos máquina emiten solo las visibles.
+    let n_mostrar = limit.map(|n| n.min(filas.len())).unwrap_or(filas.len());
+    let visibles = &filas[..n_mostrar];
     match fmt {
         Formato::Table => {
             let mut t = Table::new();
@@ -253,7 +258,7 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
         Formato::Json => serde_json::to_string(&serde_json::json!({
             "schema": 1,
             "titulo": titulo_txt,
-            "filas": filas,
+            "filas": visibles,
         }))
         .unwrap_or_default(),
         Formato::Csv => {
@@ -265,7 +270,7 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
                     .collect::<Vec<_>>()
                     .join(","),
             );
-            for fila in filas {
+            for fila in visibles {
                 out.push('\n');
                 out.push_str(
                     &fila
@@ -278,7 +283,7 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize>(
             }
             out
         }
-        Formato::Ndjson => filas
+        Formato::Ndjson => visibles
             .iter()
             .map(|f| serde_json::to_string(f).unwrap_or_default())
             .collect::<Vec<_>>()
@@ -566,5 +571,59 @@ mod tests {
             s.contains("Σ total") && s.contains("187 B"),
             "la fila Σ total debe sumar TODAS las filas, no solo las mostradas: {s}"
         );
+    }
+
+    #[test]
+    fn limit_acota_tambien_json_csv_ndjson() {
+        use caudalghost_core::proto::AppRow;
+        let filas = vec![
+            AppRow {
+                app: "firefox".into(),
+                rx: 100,
+                tx: 10,
+            },
+            AppRow {
+                app: "curl".into(),
+                rx: 50,
+                tx: 5,
+            },
+            AppRow {
+                app: "ssh".into(),
+                rx: 20,
+                tx: 2,
+            },
+        ];
+        let nd = super::emitir(
+            &filas,
+            Formato::Ndjson,
+            UnitMode::Binary,
+            true,
+            false,
+            "top",
+            Some(2),
+        );
+        assert_eq!(nd.lines().count(), 2, "ndjson respeta el limit: {nd}");
+        assert!(nd.contains("firefox") && nd.contains("curl") && !nd.contains("ssh"));
+        let csv = super::emitir(
+            &filas,
+            Formato::Csv,
+            UnitMode::Binary,
+            true,
+            false,
+            "top",
+            Some(1),
+        );
+        assert_eq!(csv.lines().count(), 2, "csv = cabecera + 1 fila: {csv}"); // header + 1
+        assert!(csv.contains("firefox") && !csv.contains("ssh"));
+        let json = super::emitir(
+            &filas,
+            Formato::Json,
+            UnitMode::Binary,
+            true,
+            false,
+            "top",
+            Some(1),
+        );
+        assert!(json.contains("firefox") && !json.contains("curl") && !json.contains("ssh"));
     }
 }
