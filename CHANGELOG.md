@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.2] — 2026-07-02
+
+### Corregido
+
+- **La GUI mostraba una versión desincronizada** (`v0.5.3`) aunque el paquete ya era 0.6.x: el footer
+  leía la versión de `package.json`, que vive **fuera del workspace** y quedaba atrás en los releases que
+  solo tocaban el daemon/CLI. Ahora `vite.config` deriva la versión del `Cargo.toml` del workspace
+  (fuente de verdad única), de modo que el footer **siempre** coincide con la versión del release.
+  Sincronizados también `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`.
+
 ## [0.6.1] — 2026-07-02
 
 ### TUI (`caudalghost live`)
