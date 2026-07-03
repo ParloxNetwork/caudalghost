@@ -263,20 +263,82 @@ fn draw_chart_one(
     serie: &[u64],
     cur: u64,
     peak: u64,
+    peak_age_secs: u64,
     flecha: &str,
     color: Color,
     units: crate::render::UnitMode,
     scrub: Option<usize>,
 ) {
-    let inner_w = area.width.saturating_sub(2) as usize;
+    // Eje X (fila inferior con "hace Nmin"/"ahora"): se reserva 1 fila si hay alto
+    // suficiente para no comerse el propio gráfico en terminales muy bajas.
+    use ratatui::layout::{Constraint as C, Direction as D, Layout as L};
+    let mostrar_x = area.height >= 6;
+    let (plot_area, x_area) = if mostrar_x {
+        let v = L::default()
+            .direction(D::Vertical)
+            .constraints([C::Min(3), C::Length(1)])
+            .split(area);
+        (v[0], Some(v[1]))
+    } else {
+        (area, None)
+    };
+    // Eje Y (canalón izquierdo con "máx visible" arriba / "0" abajo): se reserva solo si
+    // el plot resultante conserva >=20 cols interiores; si no, el gráfico usa el ancho
+    // completo (como en 0.6.0). `gw` (ancho del canalón) depende de `max_visible`, que a su
+    // vez depende de la ventana final de `plot` — hay una dependencia circular entre el
+    // split y los datos. Se resuelve en dos pasadas:
+    //   1) una ESTIMACIÓN de `max_visible` sobre `plot_area.width - 2` (cota superior del
+    //      ancho interior real, ya que descontar el canalón solo puede angostarlo más) para
+    //      fijar un `gw` provisional y decidir/realizar el split (mostrar_y/plot/inner_w).
+    //   2) con `inner_w` YA DEFINITIVO, se recalcula `max_visible` sobre esa misma ventana
+    //      (la que `fit_series` usará después para pintar el Sparkline), así la etiqueta de
+    //      arriba del canalón siempre corresponde al máximo de las barras realmente
+    //      dibujadas (antes: se reutilizaba la estimación del paso 1, calculada sobre una
+    //      ventana más ancha que la finalmente dibujada — bug crítico 0.6.1).
+    let estimacion = fit_series(serie, plot_area.width.saturating_sub(2) as usize);
+    let gw = ancho_canalon_y(estimacion.iter().copied().max().unwrap_or(0), units);
+    let mostrar_y = plot_area.width > gw + 22;
+    let (canalon, plot) = if mostrar_y {
+        let h = L::default()
+            .direction(D::Horizontal)
+            .constraints([C::Length(gw), C::Min(20)])
+            .split(plot_area);
+        (Some(h[0]), h[1])
+    } else {
+        (None, plot_area)
+    };
+    // La fila del eje X debe alinear sus columnas con `plot` (no con `plot_area`), así
+    // que si hay canalón Y le aplicamos el mismo recorte horizontal a `x_area`.
+    let x_area = x_area.map(|xa| {
+        if mostrar_y {
+            let h = L::default()
+                .direction(D::Horizontal)
+                .constraints([C::Length(gw), C::Min(20)])
+                .split(xa);
+            h[1]
+        } else {
+            xa
+        }
+    });
+    let inner_w = plot.width.saturating_sub(2) as usize;
+    let max_visible = fit_series(serie, inner_w)
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
     // ÍTEM 2 — Hint "acumulando…" cuando el gráfico aún no se ha llenado.
     // Usamos Line::from(vec![...]) para componer el título con estilos distintos:
     // tasa actual en bold (dato clave del gráfico) y el hint en DarkGray (secundario).
-    let base_title = format!(
-        " {flecha} {}/s  (pico {}/s) ",
-        format_units(cur, units),
-        format_units(peak, units)
-    );
+    let pico_txt = if peak_age_secs == 0 {
+        format!("(pico {}/s)", format_units(peak, units))
+    } else {
+        format!(
+            "(pico {}/s · hace {})",
+            format_units(peak, units),
+            edad_relativa(peak_age_secs)
+        )
+    };
+    let base_title = format!(" {flecha} {}/s  {} ", format_units(cur, units), pico_txt);
     let title_line: Line = if let Some(idx) = scrub {
         // Valor exacto de la muestra bajo el cursor + marca relativa, sobre la
         // rebanada visible (los últimos inner_w puntos, igual que fit_series).
@@ -315,11 +377,40 @@ fn draw_chart_one(
         .block(Block::default().borders(Borders::ALL).title(title_line))
         .data(&fit)
         .style(Style::default().fg(color));
-    frame.render_widget(spark, area);
+    frame.render_widget(spark, plot);
+
+    // Canalón Y: máximo visible (arriba) y "0" (abajo), alineados a la derecha, en las
+    // filas primera/última del bloque del Sparkline (donde caen el borde superior e
+    // inferior; con altura >=3 hay al menos una fila de barras entre medio).
+    if let Some(cy) = canalon {
+        if cy.width > 0 && cy.height > 0 {
+            let arriba = format_units(max_visible, units);
+            let abajo = format_units(0, units);
+            let buf = frame.buffer_mut();
+            let escribe_derecha = |buf: &mut ratatui::buffer::Buffer, y: u16, texto: &str| {
+                let len = texto.chars().count() as u16;
+                let x0 = (cy.x + cy.width).saturating_sub(len);
+                for (i, ch) in texto.chars().enumerate() {
+                    let x = x0 + i as u16;
+                    if x < cy.x {
+                        continue;
+                    }
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_symbol(&ch.to_string());
+                        cell.set_fg(Color::DarkGray);
+                    }
+                }
+            };
+            escribe_derecha(buf, cy.y, &arriba);
+            if cy.height > 1 {
+                escribe_derecha(buf, cy.y + cy.height - 1, &abajo);
+            }
+        }
+    }
 
     // Marcador de scrub: 1 columna resaltada, superpuesta al Sparkline ya dibujado.
     // scrub_idx indexa la rebanada VISIBLE (misma ventana que fit_series calcula).
-    if let (Some(idx), true) = (scrub, area.width > 2 && area.height > 2) {
+    if let (Some(idx), true) = (scrub, plot.width > 2 && plot.height > 2) {
         let start = serie.len().saturating_sub(inner_w);
         let visible_len = serie.len() - start;
         // La columna del cursor dentro de `fit` (que ancla a la derecha, con ceros
@@ -327,12 +418,54 @@ fn draw_chart_one(
         let pad = inner_w.saturating_sub(visible_len);
         let col = pad + idx.min(visible_len.saturating_sub(1));
         if col < inner_w {
-            let x = area.x + 1 + col as u16;
-            let y = area.y + area.height.saturating_sub(2); // fila de barras, dentro del borde
+            let x = plot.x + 1 + col as u16;
+            let y = plot.y + plot.height.saturating_sub(2); // fila de barras, dentro del borde
             let buf = frame.buffer_mut();
             if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.set_fg(Color::White);
                 cell.modifier.insert(Modifier::REVERSED);
+            }
+        }
+    }
+
+    // Eje X: marcador ▲ del pico (si su columna cae dentro de la franja visible) y,
+    // encima, las marcas de tiempo alineadas a las columnas de datos. Las etiquetas se
+    // pintan DESPUÉS del marcador para que "ahora" nunca quede tapada cuando el pico
+    // coincide con el borde derecho (peak_age_secs == 0 → misma columna que "ahora").
+    if let Some(xa) = x_area {
+        if xa.width > 2 {
+            let buf = frame.buffer_mut();
+            if let Some(pc) = pico_col_visible(peak_age_secs, inner_w) {
+                let x = xa.x + 1 + pc as u16;
+                if x < xa.x + xa.width {
+                    if let Some(cell) = buf.cell_mut((x, xa.y)) {
+                        cell.set_symbol("▲");
+                        cell.set_fg(color);
+                    }
+                }
+            }
+            let right_edge = xa.x + xa.width; // primera columna fuera de la franja
+            for (c, etiqueta) in ticks_eje_x(inner_w) {
+                let len = etiqueta.chars().count() as u16;
+                // Ancla normal: la etiqueta empieza en su columna de dato. Si así se saldría
+                // por el borde derecho (típico de "ahora", pegada al último dato), se
+                // retrocede lo justo para que quede completa dentro de la franja.
+                let deseado = xa.x + 1 + c as u16;
+                let x0 = if deseado + len > right_edge {
+                    right_edge.saturating_sub(len)
+                } else {
+                    deseado
+                };
+                for (i, ch) in etiqueta.chars().enumerate() {
+                    let x = x0 + i as u16;
+                    if x < xa.x + 1 || x >= right_edge {
+                        continue;
+                    }
+                    if let Some(cell) = buf.cell_mut((x, xa.y)) {
+                        cell.set_symbol(&ch.to_string());
+                        cell.set_fg(Color::DarkGray);
+                    }
+                }
             }
         }
     }
@@ -345,6 +478,16 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
     let (cur_rx, cur_tx) = model.current_rate();
     let peak_rx = rx.iter().copied().max().unwrap_or(0);
     let peak_tx = tx.iter().copied().max().unwrap_or(0);
+    // Edad (en muestras, 1 Hz => segundos) del pico: distancia entre el sample
+    // que alcanzó el máximo y el sample más reciente de la serie.
+    let edad = |serie: &[u64]| -> u64 {
+        match serie.iter().enumerate().max_by_key(|(_, v)| **v) {
+            Some((idx, _)) => (serie.len().saturating_sub(1) - idx) as u64,
+            None => 0,
+        }
+    };
+    let peak_rx_age = edad(&rx);
+    let peak_tx_age = edad(&tx);
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -363,6 +506,7 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
         &rx,
         cur_rx,
         peak_rx,
+        peak_rx_age,
         "↓",
         Color::Cyan,
         model.units,
@@ -374,6 +518,7 @@ pub fn draw_charts(frame: &mut Frame, model: &LiveModel, area: Rect) {
         &tx,
         cur_tx,
         peak_tx,
+        peak_tx_age,
         "↑",
         Color::Magenta,
         model.units,
@@ -911,6 +1056,58 @@ fn fit_series(series: &[u64], width: usize) -> Vec<u64> {
     }
 }
 
+/// Edad relativa compacta: 0 -> "ahora"; <60s -> "{s}s"; >=60s -> "{m}min" (redondeo a minuto).
+fn edad_relativa(secs: u64) -> String {
+    if secs == 0 {
+        "ahora".to_string()
+    } else if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}min", (secs + 30) / 60)
+    }
+}
+
+/// Marcas del eje X: ~4 columnas (izq, 1/3, 2/3, der) con su edad; la de la derecha = "ahora".
+/// Cada columna = 1 s; edad de la columna c = (inner_w-1 - c).
+fn ticks_eje_x(inner_w: usize) -> Vec<(usize, String)> {
+    if inner_w == 0 {
+        return Vec::new();
+    }
+    let last = inner_w - 1;
+    let mut cols = vec![0usize];
+    if inner_w >= 3 {
+        cols.push(last / 3);
+        cols.push(2 * last / 3);
+    }
+    cols.push(last);
+    cols.sort_unstable();
+    cols.dedup();
+    cols.into_iter()
+        .map(|c| (c, edad_relativa((last - c) as u64)))
+        .collect()
+}
+
+/// Columna (0..inner_w) del pico si cae dentro de la franja visible; None si quedó fuera (izquierda).
+fn pico_col_visible(peak_age_secs: u64, inner_w: usize) -> Option<usize> {
+    if inner_w == 0 {
+        return None;
+    }
+    let last = inner_w - 1;
+    if (peak_age_secs as usize) <= last {
+        Some(last - peak_age_secs as usize)
+    } else {
+        None
+    }
+}
+
+/// Ancho del canalón del eje Y = max(len de la etiqueta de arriba, len de "0 B") + 1, clamp(6,10).
+fn ancho_canalon_y(max_visible: u64, units: crate::render::UnitMode) -> u16 {
+    let top = format_units(max_visible, units);
+    let bot = format_units(0, units);
+    let w = top.chars().count().max(bot.chars().count()) as u16 + 1;
+    w.clamp(6, 10)
+}
+
 /// Barra unicode proporcional al máximo (para el panel de apps).
 fn barra_inline(v: u64, max: u64, width: usize) -> String {
     if max == 0 {
@@ -1106,6 +1303,161 @@ mod tests {
     fn grafico_vacio_no_panica() {
         let m = LiveModel::default();
         let s = render_area(&m, 80, 10, draw_charts);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn edad_relativa_formatea() {
+        assert_eq!(super::edad_relativa(0), "ahora");
+        assert_eq!(super::edad_relativa(45), "45s");
+        assert_eq!(super::edad_relativa(60), "1min");
+        assert_eq!(super::edad_relativa(420), "7min");
+    }
+
+    #[test]
+    fn ticks_eje_x_valido_y_ultima_ahora() {
+        let t = super::ticks_eje_x(40);
+        assert!(!t.is_empty());
+        assert!(
+            t.iter().all(|(c, _)| *c < 40),
+            "columnas dentro de rango: {t:?}"
+        );
+        assert_eq!(t.last().unwrap().1, "ahora");
+        assert!(super::ticks_eje_x(0).is_empty());
+    }
+
+    #[test]
+    fn pico_col_visible_dentro_y_fuera() {
+        assert_eq!(super::pico_col_visible(3, 10), Some(6)); // inner 10: last=9, col=9-3
+        assert_eq!(super::pico_col_visible(0, 10), Some(9)); // ahora = borde derecho
+        assert_eq!(super::pico_col_visible(20, 10), None); // fuera de la franja
+        assert_eq!(super::pico_col_visible(0, 0), None);
+    }
+
+    #[test]
+    fn ancho_canalon_y_clamp() {
+        let w = super::ancho_canalon_y(95_000, crate::render::UnitMode::Binary);
+        assert!((6..=10).contains(&w), "w={w}");
+    }
+
+    #[test]
+    fn chart_titulo_muestra_edad_del_pico() {
+        // pico en el sample más antiguo (edad alta), varios samples posteriores menores
+        let mut samples = vec![crate::live::state::tests_support::sample(
+            0,
+            &[("eth0", 500_000, 0)],
+        )];
+        for i in 1..90 {
+            samples.push(crate::live::state::tests_support::sample(
+                i,
+                &[("eth0", 1000, 0)],
+            ));
+        }
+        let m = LiveModel {
+            samples,
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 12, draw_charts);
+        assert!(
+            s.contains("hace"),
+            "el título debe indicar la antigüedad del pico: {s:?}"
+        );
+    }
+
+    #[test]
+    fn chart_dibuja_eje_x_con_ahora() {
+        let m = LiveModel {
+            samples: vec![
+                crate::live::state::tests_support::sample(0, &[("eth0", 1024, 0)]),
+                crate::live::state::tests_support::sample(1, &[("eth0", 2048, 0)]),
+            ],
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 12, draw_charts);
+        assert!(s.contains("ahora"), "el eje X debe marcar 'ahora': {s:?}");
+    }
+
+    #[test]
+    fn chart_sin_eje_x_en_alto_muy_bajo_no_panica() {
+        let m = LiveModel {
+            samples: vec![crate::live::state::tests_support::sample(
+                0,
+                &[("eth0", 1024, 0)],
+            )],
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 5, draw_charts); // height por gráfico < 6
+        assert!(!s.is_empty());
+        assert!(!s.contains("ahora"), "sin eje X en alto <6: {s:?}");
+    }
+
+    #[test]
+    fn chart_dibuja_canalon_y_con_cero() {
+        let m = LiveModel {
+            samples: vec![crate::live::state::tests_support::sample(
+                0,
+                &[("eth0", 3_000_000, 0)],
+            )],
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 12, draw_charts);
+        assert!(s.contains("0 B"), "el canalón Y debe mostrar el 0: {s:?}");
+    }
+
+    #[test]
+    fn chart_canalon_y_arriba_coincide_con_el_maximo_dibujado() {
+        // Repro del hallazgo crítico 0.6.1: un valor alto lejos en el pasado (fuera de la
+        // ventana que `fit_series` va a dibujar, pero dentro de una estimación más ancha que
+        // no descuenta aún el canalón Y) NO debe aparecer como la etiqueta "arriba" del eje Y.
+        // area.width = 40 → gw = ancho_canalon_y(...) = 8 (ver comentario del hallazgo) →
+        // plot.width = 32 → inner_w = 30. Colocamos el valor gigante en la columna 35 desde
+        // el final: cae dentro de la estimación (ventana 38 = plot_area.width-2) pero FUERA
+        // de la ventana final (30) que realmente se dibuja.
+        let mut serie = vec![10u64; 50];
+        let len = serie.len();
+        serie[len - 36] = 99_999; // 35 posiciones antes del último índice (0-based)
+        let ultimo = len - 1;
+        serie[ultimo] = 100; // máximo real dentro de la ventana visible final
+        let backend = ratatui::backend::TestBackend::new(40, 12);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                super::draw_chart_one(
+                    f,
+                    f.area(),
+                    &serie,
+                    100,
+                    99_999,
+                    35,
+                    "↓",
+                    Color::Cyan,
+                    crate::render::UnitMode::Binary,
+                    None,
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            !s.contains("99999 B") && !s.contains("100.0 KiB"),
+            "el canalón Y no debe mostrar un máximo fuera de la ventana dibujada: {s:?}"
+        );
+        assert!(
+            s.contains("100 B"),
+            "el canalón Y debe mostrar el máximo real de las barras visibles (100 B): {s:?}"
+        );
+    }
+
+    #[test]
+    fn chart_sin_canalon_y_en_ancho_estrecho_no_panica() {
+        let m = LiveModel {
+            samples: vec![crate::live::state::tests_support::sample(
+                0,
+                &[("eth0", 1024, 0)],
+            )],
+            ..Default::default()
+        };
+        let s = render_area(&m, 30, 12, draw_charts); // ~15 cols por gráfico -> sin canalón
         assert!(!s.is_empty());
     }
 
@@ -1502,6 +1854,47 @@ mod tests {
     }
 
     #[test]
+    fn charts_scrub_sigue_funcionando_con_ejes() {
+        // en pausa+scrub, el gráfico con ejes no entra en pánico y respeta el cursor
+        let mut samples = Vec::new();
+        for i in 0..30 {
+            samples.push(crate::live::state::tests_support::sample(
+                i,
+                &[("eth0", (i as u64 + 1) * 1000, 0)],
+            ));
+        }
+        let m = LiveModel {
+            mode: crate::live::state::Mode::PausaScrub,
+            paused: true,
+            scrub_idx: Some(5),
+            samples,
+            ..Default::default()
+        };
+        let s = render_area(&m, 100, 12, draw_charts);
+        assert!(s.contains("ahora"));
+    }
+
+    #[test]
+    fn draw_completo_con_ejes_no_panica() {
+        let mut m = LiveModel {
+            version: "0.6.1".into(),
+            ebpf: true,
+            connected: true,
+            ..Default::default()
+        };
+        m.samples = vec![
+            crate::live::state::tests_support::sample(0, &[("eth0", 1024, 512)]),
+            crate::live::state::tests_support::sample_apps(1, &[("firefox", 2048, 256)]),
+        ];
+        let backend = ratatui::backend::TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &m)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(s.contains("CaudalGhost") && s.contains("ahora") && s.contains("salir"));
+    }
+
+    #[test]
     fn draw_sin_historico_en_altura_baja() {
         let m = LiveModel {
             version: "0.1.0".into(),
@@ -1611,6 +2004,7 @@ mod tests {
                     &serie,
                     3,
                     3,
+                    0,
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
@@ -1637,6 +2031,7 @@ mod tests {
                     &serie,
                     3,
                     3,
+                    0,
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
@@ -1664,6 +2059,7 @@ mod tests {
                     &serie,
                     5,
                     5,
+                    0,
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
@@ -1675,9 +2071,12 @@ mod tests {
         // inner_w = area.width - 2 = 18; serie de 5 puntos → fit_series rellena 13 ceros a la
         // izquierda; el índice visible 2 (de 0..5) cae en la columna 13 + 2 = 15 del inner,
         // es decir x = area.x + 1 (borde) + 15 = 16 dentro del buffer.
+        // Con height=6 se reserva 1 fila para el eje X (Task 3): el plot del Sparkline
+        // queda con height=5 (Constraint::Min(3) de 6 - Length(1) del eje X).
         let area = ratatui::layout::Rect::new(0, 0, 20, 6);
         let x_cursor = area.x + 1 + 15;
-        let y_dato = area.y + area.height - 2; // fila de datos del sparkline (dentro del borde)
+        let plot_height = 5; // area.height(6) - 1 (fila del eje X)
+        let y_dato = area.y + plot_height - 2; // fila de datos del sparkline (dentro del borde)
         let celda = buf.cell((x_cursor, y_dato)).unwrap();
         assert!(
             celda.style().fg == Some(Color::White) || celda.modifier.contains(Modifier::REVERSED),
@@ -1699,6 +2098,7 @@ mod tests {
                     &serie,
                     30,
                     30,
+                    0,
                     "↓",
                     Color::Cyan,
                     crate::render::UnitMode::Binary,
@@ -1732,6 +2132,7 @@ mod tests {
                         &serie,
                         5,
                         5,
+                        0,
                         "↓",
                         Color::Cyan,
                         crate::render::UnitMode::Binary,
