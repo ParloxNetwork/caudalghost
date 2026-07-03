@@ -47,6 +47,9 @@ struct OpcionesSalida {
     /// Desactiva color (también respeta NO_COLOR)
     #[arg(long)]
     no_color: bool,
+    /// Proyección de columnas para csv/json/ndjson (coma-separadas). Válidas: las de la cabecera del comando.
+    #[arg(long, value_name = "a,b,c", value_delimiter = ',')]
+    fields: Vec<String>,
 }
 
 impl OpcionesSalida {
@@ -394,6 +397,36 @@ fn rechaza_si_error(resp: &Response) -> Result<(), SalidaError> {
     }
 }
 
+/// Valida los nombres de `--fields` contra las columnas válidas del comando.
+fn validar_fields(pedidos: &[String], validos: &[&str]) -> Result<(), SalidaError> {
+    for f in pedidos {
+        if !validos.iter().any(|v| v == f) {
+            return Err(SalidaError::Otro(format!(
+                "campo desconocido '{f}'; válidos: {}",
+                validos.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Devuelve las columnas `--fields` a proyectar (o `None`), validando que el
+/// formato sea máquina (csv/json/ndjson) y que los nombres existan en `T`.
+fn fields_para<T: render::Tabulable>(
+    salida: &OpcionesSalida,
+) -> Result<Option<Vec<String>>, SalidaError> {
+    if salida.fields.is_empty() {
+        return Ok(None);
+    }
+    if salida.formato() == Formato::Table {
+        return Err(SalidaError::Otro(
+            "--fields aplica a csv/json/ndjson (no a table)".into(),
+        ));
+    }
+    validar_fields(&salida.fields, &T::cabecera())?;
+    Ok(Some(salida.fields.clone()))
+}
+
 /// Imprime la salida de `render::emitir` seguida de su salto de línea final
 /// — pero solo si `s` no está vacío. `emitir` devuelve `""` en `-o csv`/`-o
 /// ndjson` cuando no hay filas (ndjson: `join("\n")` de un iterador vacío);
@@ -412,7 +445,10 @@ fn imprimir(s: &str) {
 fn run(cli: &Cli) -> Result<(), SalidaError> {
     let socket = resolver_socket(cli.socket.clone(), std::env::var("CAUDALGHOST_SOCKET").ok());
     match &cli.cmd {
-        Cmd::Ping { .. } => {
+        Cmd::Ping { salida } => {
+            if !salida.fields.is_empty() {
+                return Err(SalidaError::Otro("--fields no aplica a ping".into()));
+            }
             let resp = llamar(&socket, &Request::Ping)?;
             if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
                 return Err(SalidaError::Otro(
@@ -435,7 +471,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             }
             Ok(())
         }
-        Cmd::Now { seconds, all, .. } => {
+        Cmd::Now {
+            seconds,
+            all,
+            salida,
+        } => {
+            let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let resp = llamar(&socket, &Request::Snapshot { seconds: *seconds })?;
             rechaza_si_error(&resp)?;
             if let Response::Snapshot { samples } = &resp {
@@ -463,12 +504,14 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         cli.color(),
                         "⏱ now",
                         None,
+                        fields.as_deref(),
                     ));
                 }
             }
             Ok(())
         }
-        Cmd::Total { rango, all, .. } => {
+        Cmd::Total { rango, all, salida } => {
+            let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -492,11 +535,18 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     cli.color(),
                     &format!("Σ rango: {rango}"),
                     None,
+                    fields.as_deref(),
                 ));
             }
             Ok(())
         }
-        Cmd::Top { seconds, limit, .. } => {
+        Cmd::Top {
+            seconds,
+            limit,
+            salida,
+            ..
+        } => {
+            let fields = fields_para::<caudalghost_core::proto::AppRow>(salida)?;
             let rango = rango_de_top(cli);
             match (rango, seconds) {
                 (Some(rango), None) => {
@@ -520,6 +570,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             cli.color(),
                             &format!("⛰ top apps · rango: {rango}"),
                             *limit,
+                            fields.as_deref(),
                         ));
                     }
                     Ok(())
@@ -543,6 +594,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             cli.color(),
                             &format!("⛰ top apps · {etiqueta}"),
                             *limit,
+                            fields.as_deref(),
                         ));
                     }
                     Ok(())
@@ -551,8 +603,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             }
         }
         Cmd::Hosts {
-            rango, app, limit, ..
+            rango,
+            app,
+            limit,
+            salida,
         } => {
+            let fields = fields_para::<caudalghost_core::proto::RemoteRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -584,11 +640,17 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     cli.color(),
                     &etiqueta,
                     *limit,
+                    fields.as_deref(),
                 ));
             }
             Ok(())
         }
-        Cmd::Serie { rango, bucket, .. } => {
+        Cmd::Serie {
+            rango,
+            bucket,
+            salida,
+        } => {
+            let fields = fields_para::<render::SerieRow>(salida)?;
             let w = resolver_rango(rango)?;
             let bucket = bucket.map(Bucket::from).unwrap_or_else(|| {
                 range::pick_bucket(w.start, w.end, chrono::Local::now().timestamp())
@@ -638,6 +700,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         cli.color(),
                         "",
                         None,
+                        None,
                     ));
                 } else {
                     imprimir(&render::emitir(
@@ -648,6 +711,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         cli.color(),
                         &titulo_txt,
                         None,
+                        fields.as_deref(),
                     ));
                 }
             }
@@ -1075,6 +1139,7 @@ mod tests {
             false,
             "now",
             None,
+            None,
         );
         assert!(j.contains("\"schema\""));
     }
@@ -1175,5 +1240,53 @@ mod tests {
     #[test]
     fn aviso_sin_datos_rango_menciona_el_rango() {
         assert!(super::aviso_sin_datos_rango("7d").contains("7d"));
+    }
+
+    #[test]
+    fn top_csv_fields_proyecta() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("f.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut l = String::new();
+            reader.read_line(&mut l).unwrap();
+            let mut s = stream;
+            s.write_all(b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"firefox\",\"rx\":100,\"tx\":20}]}\n")
+                .unwrap();
+        });
+        let cli = Cli::try_parse_from([
+            "caudalghost",
+            "--socket",
+            sock.to_str().unwrap(),
+            "top",
+            "hoy",
+            "-o",
+            "csv",
+            "--fields",
+            "app,total",
+        ])
+        .unwrap();
+        run(&cli).expect("top csv fields");
+    }
+
+    #[test]
+    fn fields_invalido_es_error() {
+        let cli =
+            Cli::try_parse_from(["caudalghost", "top", "hoy", "-o", "csv", "--fields", "nope"])
+                .unwrap();
+        let salida = cli.salida().unwrap();
+        let r = fields_para::<caudalghost_core::proto::AppRow>(salida);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn fields_en_table_es_error() {
+        let cli = Cli::try_parse_from(["caudalghost", "top", "hoy", "--fields", "app"]).unwrap();
+        let salida = cli.salida().unwrap();
+        assert!(fields_para::<caudalghost_core::proto::AppRow>(salida).is_err());
     }
 }
