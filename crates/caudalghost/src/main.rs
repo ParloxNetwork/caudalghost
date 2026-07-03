@@ -23,26 +23,33 @@ struct Cli {
     /// Socket del daemon (default: XDG runtime)
     #[arg(long, global = true)]
     socket: Option<PathBuf>,
-    /// Formato de salida
-    #[arg(short = 'o', long, global = true, value_enum, default_value_t = Formato::Table)]
-    output: Formato,
-    /// Unidades para las tasas/tamaños en las tablas
-    #[arg(short = 'u', long, global = true, value_enum, default_value_t = render::UnitMode::Binary)]
-    units: render::UnitMode,
-    /// Salida JSON cruda (para scripts y widgets). Alias de -o json.
-    #[arg(long, global = true)]
-    json: bool,
-    /// Omite título/decoración: solo datos
-    #[arg(short = 'q', long, global = true)]
-    quiet: bool,
-    /// Desactiva color (también respeta NO_COLOR)
-    #[arg(long, global = true)]
-    no_color: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
-impl Cli {
+/// Flags de salida (`-o/-u/--json/-q/--no-color`), aplanados **solo** en los
+/// subcommandos de datos (`ping/now/total/top/hosts`). `live` no los lleva:
+/// la TUI los ignora y no tiene sentido listarlos en su `--help`.
+#[derive(clap::Args, Clone)]
+struct OpcionesSalida {
+    /// Formato de salida
+    #[arg(short = 'o', long, value_enum, default_value_t = Formato::Table)]
+    output: Formato,
+    /// Unidades para las tasas/tamaños en las tablas
+    #[arg(short = 'u', long, value_enum, default_value_t = render::UnitMode::Binary)]
+    units: render::UnitMode,
+    /// Salida JSON cruda (para scripts y widgets). Alias de -o json.
+    #[arg(long)]
+    json: bool,
+    /// Omite título/decoración: solo datos
+    #[arg(short = 'q', long)]
+    quiet: bool,
+    /// Desactiva color (también respeta NO_COLOR)
+    #[arg(long)]
+    no_color: bool,
+}
+
+impl OpcionesSalida {
     /// Formato efectivo: `--json` fuerza `-o json` (alias retro-compatible).
     fn formato(&self) -> Formato {
         if self.json {
@@ -58,6 +65,47 @@ impl Cli {
             return false;
         }
         std::io::stdout().is_terminal()
+    }
+}
+
+impl Cli {
+    /// Opciones de salida del subcomando activo (`None` para `Live`, que no
+    /// las lleva).
+    fn salida(&self) -> Option<&OpcionesSalida> {
+        match &self.cmd {
+            Cmd::Ping { salida } => Some(salida),
+            Cmd::Now { salida, .. } => Some(salida),
+            Cmd::Total { salida, .. } => Some(salida),
+            Cmd::Top { salida, .. } => Some(salida),
+            Cmd::Hosts { salida, .. } => Some(salida),
+            Cmd::Live { .. } | Cmd::Completions { .. } | Cmd::Man => None,
+        }
+    }
+
+    /// Formato efectivo del subcomando activo; `Table` por defecto si no
+    /// lleva `OpcionesSalida` (p.ej. `live`, que no lo usa para render de datos).
+    fn formato(&self) -> Formato {
+        self.salida().map(|s| s.formato()).unwrap_or(Formato::Table)
+    }
+
+    /// Unidades del subcomando activo (default `Binary` si no aplica).
+    fn units(&self) -> render::UnitMode {
+        self.salida()
+            .map(|s| s.units)
+            .unwrap_or(render::UnitMode::Binary)
+    }
+
+    /// `--quiet` del subcomando activo (default `false` si no aplica).
+    fn quiet(&self) -> bool {
+        self.salida().map(|s| s.quiet).unwrap_or(false)
+    }
+
+    /// Color habilitado del subcomando activo (default: color de terminal
+    /// si no aplica `OpcionesSalida`).
+    fn color(&self) -> bool {
+        self.salida().map(|s| s.color()).unwrap_or_else(|| {
+            std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal()
+        })
     }
 }
 
@@ -157,7 +205,10 @@ fn clasifica_error_conexion(e: anyhow::Error) -> SalidaError {
 #[derive(Subcommand)]
 enum Cmd {
     /// Verifica conexión con el daemon
-    Ping,
+    Ping {
+        #[command(flatten)]
+        salida: OpcionesSalida,
+    },
     /// Actividad de los últimos segundos
     Now {
         #[arg(long, default_value_t = 60)]
@@ -165,6 +216,8 @@ enum Cmd {
         /// Incluir loopback
         #[arg(long)]
         all: bool,
+        #[command(flatten)]
+        salida: OpcionesSalida,
     },
     /// Totales por rango
     Total {
@@ -174,6 +227,8 @@ enum Cmd {
         /// Incluir loopback
         #[arg(long)]
         all: bool,
+        #[command(flatten)]
+        salida: OpcionesSalida,
     },
     /// Top de aplicaciones: por rango histórico o ventana en vivo
     #[command(group(
@@ -194,6 +249,8 @@ enum Cmd {
         /// Limita a las primeras N filas (tras ordenar por total desc)
         #[arg(short = 'n', long = "limit", value_name = "N")]
         limit: Option<usize>,
+        #[command(flatten)]
+        salida: OpcionesSalida,
     },
     /// Top de hosts remotos por rango; opcionalmente filtrado por app
     Hosts {
@@ -206,6 +263,8 @@ enum Cmd {
         /// Limita a las primeras N filas (tras ordenar por total desc)
         #[arg(short = 'n', long = "limit", value_name = "N")]
         limit: Option<usize>,
+        #[command(flatten)]
+        salida: OpcionesSalida,
     },
     /// Dashboard interactivo en vivo (TUI pantalla completa)
     Live {
@@ -268,22 +327,19 @@ fn ayuda_rango() -> String {
     format!("Tokens válidos: {}", range::tokens_ayuda())
 }
 
-/// `--version` "rico": versión de Cargo.toml + hash/fecha de build si el
-/// pipeline de empaquetado los inyectó vía variables de entorno en tiempo de
-/// compilación (`CAUDALGHOST_BUILD_HASH`/`CAUDALGHOST_BUILD_DATE`). En un
-/// `cargo build`/`cargo test` normal (sin esas env vars) no falla: cae en
-/// solo la versión semántica, sin invocar `git` en tiempo de ejecución.
+/// `--version` "rico": versión de Cargo.toml + hash corto de git + fecha de
+/// build, inyectados en tiempo de compilación por `build.rs` vía
+/// `CG_GIT_HASH`/`CG_BUILD_DATE`. `build.rs` obtiene la fecha con
+/// `date -u +%Y-%m-%d` (o la deriva de `SOURCE_DATE_EPOCH` si está presente,
+/// para builds reproducibles); si `git`/`date` no están disponibles al
+/// compilar, degrada esos campos a `"desconocido"` sin fallar el build; en
+/// tiempo de ejecución esta función nunca invoca `git`/`date`, solo lee las
+/// env compiladas.
 fn long_version() -> &'static str {
     const VERSION: &str = env!("CARGO_PKG_VERSION");
-    const HASH: Option<&str> = option_env!("CAUDALGHOST_BUILD_HASH");
-    const FECHA: Option<&str> = option_env!("CAUDALGHOST_BUILD_DATE");
-    match (HASH, FECHA) {
-        (Some(hash), Some(fecha)) => {
-            Box::leak(format!("{VERSION} ({hash}, {fecha})").into_boxed_str())
-        }
-        (Some(hash), None) => Box::leak(format!("{VERSION} ({hash})").into_boxed_str()),
-        _ => VERSION,
-    }
+    const HASH: &str = env!("CG_GIT_HASH");
+    const FECHA: &str = env!("CG_BUILD_DATE");
+    Box::leak(format!("{VERSION} ({HASH} {FECHA})").into_boxed_str())
 }
 
 /// Rango efectivo de `top`: posicional o `--rango` (mutuamente excluyentes vía
@@ -308,15 +364,37 @@ fn rechaza_si_error(resp: &Response) -> Result<(), SalidaError> {
     }
 }
 
+/// Imprime la salida de `render::emitir` seguida de su salto de línea final
+/// — pero solo si `s` no está vacío. `emitir` devuelve `""` en `-o csv`/`-o
+/// ndjson` cuando no hay filas (ndjson: `join("\n")` de un iterador vacío);
+/// sin este guard, un `print!("{s}"); println!();` a ciegas deja un `\n`
+/// suelto (1 byte) en vez de una salida de 0 bytes. Con `s` no vacío el
+/// comportamiento es idéntico al `print!`/`println!` de siempre.
+fn imprimir(s: &str) {
+    print!("{s}");
+    if !s.is_empty() {
+        println!();
+    }
+}
+
 /// Cuerpo real de la CLI, ya sin `main()`/`process::exit` de por medio: fácil
 /// de probar y de envolver en la clasificación de `SalidaError`.
 fn run(cli: &Cli) -> Result<(), SalidaError> {
     let socket = resolver_socket(cli.socket.clone(), std::env::var("CAUDALGHOST_SOCKET").ok());
     match &cli.cmd {
-        Cmd::Ping => {
+        Cmd::Ping { .. } => {
             let resp = llamar(&socket, &Request::Ping)?;
-            salida(cli, &resp, |r| {
-                if let Response::Pong { version, ebpf } = r {
+            if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
+                return Err(SalidaError::Otro(
+                    "este comando no admite -o csv/ndjson (usa table o json); csv/ndjson aplican a total/top/hosts"
+                        .into(),
+                ));
+            }
+            rechaza_si_error(&resp)?;
+            if let Response::Pong { version, ebpf } = &resp {
+                if cli.formato() == Formato::Json {
+                    println!("{}", ping_json(version, *ebpf));
+                } else {
                     let estado = if *ebpf {
                         "activo"
                     } else {
@@ -324,18 +402,20 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     };
                     println!("caudalghostd v{version} responde ✓ · eBPF: {estado}");
                 }
-            })
+            }
+            Ok(())
         }
-        Cmd::Now { seconds, all } => {
+        Cmd::Now { seconds, all, .. } => {
             let resp = llamar(&socket, &Request::Snapshot { seconds: *seconds })?;
-            salida(cli, &resp, |r| {
-                if let Response::Snapshot { samples } = r {
+            rechaza_si_error(&resp)?;
+            if let Response::Snapshot { samples } = &resp {
+                if cli.formato() == Formato::Table {
                     let secs = samples.len().max(1) as u64;
                     let filas: Vec<_> = agrega_series(samples)
                         .into_iter()
                         .filter(|(i, _, _, _)| *all || i != "lo")
                         .collect();
-                    if !cli.quiet {
+                    if !cli.quiet() {
                         let titulo_txt = format!("⏱ últimos {secs} s");
                         if cli.color() {
                             println!("{}", render::titulo(&titulo_txt));
@@ -343,11 +423,22 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             println!("{titulo_txt}");
                         }
                     }
-                    println!("{}", render::tabla_now(&filas, secs, cli.units));
+                    println!("{}", render::tabla_now(&filas, secs, cli.units()));
+                } else {
+                    imprimir(&render::emitir(
+                        &filas_now_maquina(samples, *all),
+                        cli.formato(),
+                        cli.units(),
+                        cli.quiet(),
+                        cli.color(),
+                        "⏱ now",
+                        None,
+                    ));
                 }
-            })
+            }
+            Ok(())
         }
-        Cmd::Total { rango, all } => {
+        Cmd::Total { rango, all, .. } => {
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -363,19 +454,15 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     .filter(|r| *all || r.iface != "lo")
                     .cloned()
                     .collect();
-                print!(
-                    "{}",
-                    render::emitir(
-                        &filtradas,
-                        cli.formato(),
-                        cli.units,
-                        cli.quiet,
-                        cli.color(),
-                        &format!("Σ rango: {rango}"),
-                        None,
-                    )
-                );
-                println!();
+                imprimir(&render::emitir(
+                    &filtradas,
+                    cli.formato(),
+                    cli.units(),
+                    cli.quiet(),
+                    cli.color(),
+                    &format!("Σ rango: {rango}"),
+                    None,
+                ));
             }
             Ok(())
         }
@@ -395,19 +482,15 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     if let Response::TotalApps { rows } = &resp {
                         let mut ordenadas = rows.clone();
                         ordenadas.sort_by_key(|r| std::cmp::Reverse(r.rx + r.tx));
-                        print!(
-                            "{}",
-                            render::emitir(
-                                &ordenadas,
-                                cli.formato(),
-                                cli.units,
-                                cli.quiet,
-                                cli.color(),
-                                &format!("⛰ top apps · rango: {rango}"),
-                                *limit,
-                            )
-                        );
-                        println!();
+                        imprimir(&render::emitir(
+                            &ordenadas,
+                            cli.formato(),
+                            cli.units(),
+                            cli.quiet(),
+                            cli.color(),
+                            &format!("⛰ top apps · rango: {rango}"),
+                            *limit,
+                        ));
                     }
                     Ok(())
                 }
@@ -422,26 +505,24 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             .map(|(app, rx, tx)| caudalghost_core::proto::AppRow { app, rx, tx })
                             .collect();
                         let etiqueta = format!("últimos {seconds} s");
-                        print!(
-                            "{}",
-                            render::emitir(
-                                &rows,
-                                cli.formato(),
-                                cli.units,
-                                cli.quiet,
-                                cli.color(),
-                                &format!("⛰ top apps · {etiqueta}"),
-                                *limit,
-                            )
-                        );
-                        println!();
+                        imprimir(&render::emitir(
+                            &rows,
+                            cli.formato(),
+                            cli.units(),
+                            cli.quiet(),
+                            cli.color(),
+                            &format!("⛰ top apps · {etiqueta}"),
+                            *limit,
+                        ));
                     }
                     Ok(())
                 }
                 (Some(_), Some(_)) => unreachable!("clap conflicts_with lo impide"),
             }
         }
-        Cmd::Hosts { rango, app, limit } => {
+        Cmd::Hosts {
+            rango, app, limit, ..
+        } => {
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -453,25 +534,27 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             )?;
             rechaza_si_error(&resp)?;
             if let Response::TopRemotes { rows } = &resp {
+                if rows.is_empty() && cli.formato() == Formato::Table {
+                    if let Some(a) = app {
+                        eprintln!("{}", aviso_sin_datos_app(a, rango));
+                        return Ok(());
+                    }
+                }
                 let mut ordenados = rows.clone();
                 ordenados.sort_by_key(|r| std::cmp::Reverse(r.rx + r.tx));
                 let etiqueta = match app {
                     Some(a) => format!("🌐 hosts · {a} · rango: {rango}"),
                     None => format!("🌐 hosts · rango: {rango}"),
                 };
-                print!(
-                    "{}",
-                    render::emitir(
-                        &ordenados,
-                        cli.formato(),
-                        cli.units,
-                        cli.quiet,
-                        cli.color(),
-                        &etiqueta,
-                        *limit,
-                    )
-                );
-                println!();
+                imprimir(&render::emitir(
+                    &ordenados,
+                    cli.formato(),
+                    cli.units(),
+                    cli.quiet(),
+                    cli.color(),
+                    &etiqueta,
+                    *limit,
+                ));
             }
             Ok(())
         }
@@ -520,28 +603,30 @@ fn generar_man() -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// JSON crudo con -o json/--json; render humano si no. Error del daemon →
-/// `SalidaError::ErrorNegocio` (ya filtrado antes de llegar aquí por los
-/// llamantes que usan `rechaza_si_error`; `Ping`/`Now` lo comprueban aquí
-/// mismo porque no tienen más post-proceso).
-fn salida(cli: &Cli, resp: &Response, humano: impl Fn(&Response)) -> Result<(), SalidaError> {
-    if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
-        return Err(SalidaError::Otro(
-            "este comando no admite -o csv/ndjson (usa table o json); csv/ndjson aplican a total/top/hosts"
-                .into(),
-        ));
-    }
-    rechaza_si_error(resp)?;
-    if cli.formato() == Formato::Json {
-        println!(
-            "{}",
-            serde_json::to_string(resp)
-                .map_err(|e| SalidaError::Otro(format!("no pude serializar la respuesta: {e}")))?
-        );
-    } else {
-        humano(resp);
-    }
-    Ok(())
+/// Filas "máquina" de `now`: totales agregados por interfaz (sin la serie del
+/// sparkline, que solo tiene sentido en la tabla humana), listas para pasar
+/// por `render::emitir` en `-o json/csv/ndjson`. `all` conserva `lo` si `true`.
+fn filas_now_maquina(
+    samples: &[caudalghost_core::types::Sample],
+    all: bool,
+) -> Vec<caudalghost_core::proto::TotalRow> {
+    agrega_series(samples)
+        .into_iter()
+        .filter(|(i, _, _, _)| all || i != "lo")
+        .map(|(iface, rx, tx, _serie)| caudalghost_core::proto::TotalRow { iface, rx, tx })
+        .collect()
+}
+
+/// Envoltorio JSON consistente para `ping -o json`: mismo contrato `"schema":1`
+/// que el resto de la CLI, en vez del `Response` crudo del daemon.
+fn ping_json(version: &str, ebpf: bool) -> String {
+    serde_json::json!({"schema": 1, "version": version, "ebpf": ebpf}).to_string()
+}
+
+/// Mensaje de aviso cuando `hosts <rango> --app X` no devuelve filas: evita
+/// que el usuario vea una tabla vacía sin contexto de qué se filtró.
+fn aviso_sin_datos_app(app: &str, rango: &str) -> String {
+    format!("sin datos para la app '{app}' en el rango {rango}")
 }
 
 /// Colapsa los AppDelta de una ventana de samples, ordenados por total desc.
@@ -658,6 +743,14 @@ mod tests {
     }
 
     #[test]
+    fn long_version_incluye_version() {
+        let v = super::long_version();
+        assert!(v.starts_with(env!("CARGO_PKG_VERSION")));
+        // no entra en pánico y trae los tres campos (hash/fecha pueden ser "desconocido")
+        assert!(v.contains('(') && v.contains(')'));
+    }
+
+    #[test]
     fn error_a_json_estructurado() {
         use super::SalidaError;
         let j = SalidaError::RangoInvalido("rango-malo".into()).a_json();
@@ -707,11 +800,10 @@ mod tests {
         assert!(matches!(err, SalidaError::DaemonInalcanzable(_)));
     }
 
-    /// `ping`/`now` con `-o csv` o `-o ndjson` deben rechazarse con un mensaje
-    /// claro en vez de caer en silencio a la tabla (ambos solo soportan
-    /// table/json, ya que no pasan por `render::emitir`).
+    /// `ping` con `-o csv`/`-o ndjson` se rechaza con un mensaje claro (no es
+    /// tabular, no pasa por `render::emitir`).
     #[test]
-    fn ping_y_now_rechazan_csv_y_ndjson() {
+    fn ping_rechaza_csv_y_ndjson() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
@@ -736,9 +828,9 @@ mod tests {
                 "caudalghost",
                 "--socket",
                 sock.to_str().unwrap(),
+                "ping",
                 "-o",
                 formato,
-                "ping",
             ])
             .unwrap();
             let err = run(&cli).expect_err(&format!("ping -o {formato} debe devolver Err"));
@@ -749,27 +841,44 @@ mod tests {
             assert_eq!(err.exit_code(), 1);
             assert!(err.mensaje_humano().contains("csv/ndjson"));
         }
+    }
+
+    /// `now` con `-o csv`/`-o ndjson` ya no se rechaza: pasa por `render::emitir`
+    /// (vía `filas_now_maquina`) igual que `total/top/hosts`.
+    #[test]
+    fn now_acepta_csv_y_ndjson() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        fn responde_snapshot(sock: &std::path::Path) {
+            let listener = UnixListener::bind(sock).unwrap();
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut s = stream;
+                s.write_all(
+                    b"{\"type\":\"snapshot\",\"samples\":[{\"ts\":0,\"deltas\":[{\"iface\":\"eth0\",\"rx\":100,\"tx\":10}],\"apps\":[],\"flows\":[]}]}\n",
+                )
+                .unwrap();
+            });
+        }
 
         for formato in ["csv", "ndjson"] {
             let dir = tempfile::tempdir().unwrap();
             let sock = dir.path().join("fake.sock");
-            responde_pong(&sock);
+            responde_snapshot(&sock);
             let cli = Cli::try_parse_from([
                 "caudalghost",
                 "--socket",
                 sock.to_str().unwrap(),
+                "now",
                 "-o",
                 formato,
-                "now",
             ])
             .unwrap();
-            let err = run(&cli).expect_err(&format!("now -o {formato} debe devolver Err"));
-            assert!(
-                matches!(err, SalidaError::Otro(_)),
-                "formato {formato}: {err:?}"
-            );
-            assert_eq!(err.exit_code(), 1);
-            assert!(err.mensaje_humano().contains("csv/ndjson"));
+            run(&cli).unwrap_or_else(|e| panic!("now -o {formato} no debe fallar: {e:?}"));
         }
     }
 
@@ -843,6 +952,40 @@ mod tests {
     }
 
     #[test]
+    fn now_maquina_por_emitir_con_schema() {
+        let samples = vec![Sample {
+            ts: 0,
+            deltas: vec![IfaceDelta {
+                iface: "eth0".into(),
+                rx: 100,
+                tx: 10,
+            }],
+            apps: vec![],
+            flows: vec![],
+        }];
+        let filas = super::filas_now_maquina(&samples, /*all=*/ false);
+        assert_eq!(filas.len(), 1);
+        assert_eq!(filas[0].iface, "eth0");
+        // json de emitir sobre esas filas lleva "schema":1
+        let j = crate::render::emitir(
+            &filas,
+            crate::render::Formato::Json,
+            crate::render::UnitMode::Binary,
+            true,
+            false,
+            "now",
+            None,
+        );
+        assert!(j.contains("\"schema\""));
+    }
+
+    #[test]
+    fn ping_json_lleva_schema() {
+        let j = super::ping_json("1.2.3", true);
+        assert!(j.contains("\"schema\"") && j.contains("1.2.3") && j.contains("ebpf"));
+    }
+
+    #[test]
     fn socket_precedencia_flag_env_default() {
         use std::path::PathBuf;
         assert_eq!(
@@ -855,5 +998,33 @@ mod tests {
         );
         // None/None => default XDG (no vacío)
         assert!(!resolver_socket(None, None).as_os_str().is_empty());
+    }
+
+    #[test]
+    fn hosts_app_vacio_da_aviso_en_texto() {
+        let m = super::aviso_sin_datos_app("noexiste", "hoy");
+        assert!(m.contains("noexiste") && m.contains("hoy"));
+    }
+
+    #[test]
+    fn live_help_no_lista_flags_de_salida() {
+        use clap::CommandFactory;
+        let mut cmd = super::Cli::command();
+        let mut live = cmd.find_subcommand_mut("live").unwrap().clone();
+        let help = live.render_help().to_string();
+        assert!(
+            !help.contains("--output"),
+            "live no debe listar --output: {help}"
+        );
+        assert!(!help.contains("--units"));
+    }
+
+    #[test]
+    fn total_help_si_lista_flags_de_salida() {
+        use clap::CommandFactory;
+        let mut cmd = super::Cli::command();
+        let mut total = cmd.find_subcommand_mut("total").unwrap().clone();
+        let help = total.render_help().to_string();
+        assert!(help.contains("--output") && help.contains("--units"));
     }
 }
