@@ -13,6 +13,7 @@ pub enum Mode {
     Filtro,
     PausaScrub,
     Ayuda,
+    Drilldown,
 }
 
 /// Panel con el foco de navegación (Tab/Shift+Tab ciclan entre estos).
@@ -24,6 +25,14 @@ pub enum Focus {
     IfacesVivo,
     AppsHist,
     IfacesHist,
+}
+
+/// Estado del drill-down activo: app elegida y desde qué panel se entró
+/// (determina si el histórico pide `TopRemotes` o el en-vivo agrega `flows`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Drill {
+    pub app: String,
+    pub desde: Focus,
 }
 
 /// Tecla lógica, independiente del backend de terminal (crossterm).
@@ -75,7 +84,16 @@ pub struct LiveModel {
     pub scrub_idx: Option<usize>,
     /// Intentos de reconexión consecutivos (para el backoff).
     pub reconnect_attempts: u32,
+    /// Drill-down activo (app + panel de origen), o `None` fuera de `Mode::Drilldown`.
+    pub drill: Option<Drill>,
+    /// Índice del rango histórico activo en `RANGOS` (cicla con 'r').
+    pub hist_range_idx: usize,
+    /// Hosts remotos de la app en drill histórico (poblado por `TopRemotes`).
+    pub drill_hosts: Vec<caudalghost_core::proto::RemoteRow>,
 }
+
+/// Tokens de rango histórico ciclables con 'r': "todo" es el registro completo.
+pub const RANGOS: [&str; 5] = ["todo", "hoy", "ayer", "7d", "30d"];
 
 impl LiveModel {
     fn incluir(&self, iface: &str) -> bool {
@@ -182,6 +200,68 @@ impl LiveModel {
         v.sort_by_key(|(_, rx, tx, _)| std::cmp::Reverse(rx + tx));
         v
     }
+
+    /// Hosts remotos de `app` agregados por host sobre los últimos PANEL_WINDOW_SECS
+    /// samples (en vivo), ordenados por total desc: (host, rx, tx).
+    pub fn hosts_de_app(&self, app: &str) -> Vec<(String, u64, u64)> {
+        use std::collections::HashMap;
+        let start = self.samples.len().saturating_sub(PANEL_WINDOW_SECS);
+        let mut acc: HashMap<String, (u64, u64)> = HashMap::new();
+        for s in &self.samples[start..] {
+            for f in &s.flows {
+                if f.app == app {
+                    let e = acc.entry(f.host.clone()).or_default();
+                    e.0 += f.rx;
+                    e.1 += f.tx;
+                }
+            }
+        }
+        let mut v: Vec<(String, u64, u64)> =
+            acc.into_iter().map(|(k, (rx, tx))| (k, rx, tx)).collect();
+        v.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
+        v
+    }
+
+    /// App en `selected_row` del panel de apps enfocado (mismo orden/filtro que dibuja
+    /// ui.rs: top_apps()/hist_apps ordenado desc, filtrado por `nombre_coincide`).
+    /// `None` si el foco no es un panel de apps o no hay selección válida.
+    pub fn app_seleccionada(&self) -> Option<String> {
+        let nombres: Vec<String> = match self.focus {
+            Focus::AppsVivo => self
+                .top_apps()
+                .into_iter()
+                .map(|(a, _, _)| a)
+                .filter(|a| nombre_coincide(a, &self.filtro))
+                .collect(),
+            Focus::AppsHist => {
+                let mut v: Vec<(String, u64, u64)> = self
+                    .hist_apps
+                    .iter()
+                    .map(|r| (r.app.clone(), r.rx, r.tx))
+                    .collect();
+                v.sort_by_key(|(_, rx, tx)| std::cmp::Reverse(rx + tx));
+                v.into_iter()
+                    .map(|(a, _, _)| a)
+                    .filter(|a| nombre_coincide(a, &self.filtro))
+                    .collect()
+            }
+            _ => return None,
+        };
+        nombres.get(self.selected_row).cloned()
+    }
+}
+
+/// Rango histórico → ventana (start, end) en epoch UTC. "todo" es todo el registro
+/// (sin filtro de tiempo); el resto delega en `caudalghost_core::range::resolve`.
+pub fn rango_a_ventana(token: &str, ahora: chrono::DateTime<chrono::Local>) -> (i64, i64) {
+    if token == "todo" {
+        (0, i64::MAX)
+    } else {
+        match caudalghost_core::range::resolve(token, ahora) {
+            Ok(w) => (w.start, w.end),
+            Err(_) => (0, i64::MAX),
+        }
+    }
 }
 
 /// Resultado de procesar una tecla.
@@ -246,6 +326,9 @@ pub fn keymap_activo() -> Vec<(&'static str, &'static str)> {
         ("←/→", "(en pausa) mover cursor de scrub"),
         ("Enter", "Zoom del panel enfocado"),
         ("/", "Filtro incremental (panel enfocado)"),
+        ("→/l", "Hosts de la app (drill-down)"),
+        ("←", "Volver (sale del drill-down)"),
+        ("r", "Ciclar rango histórico (todo/hoy/ayer/7d/30d)"),
         ("?", "Overlay de ayuda"),
     ]
 }
@@ -276,6 +359,16 @@ pub fn apply_key(model: &mut LiveModel, key: Key) -> Action {
             Key::Esc => {
                 model.mode = Mode::Normal;
                 model.filtro.clear();
+                Action::Redraw
+            }
+            _ => Action::None,
+        };
+    }
+    if model.mode == Mode::Drilldown {
+        return match key {
+            Key::Left | Key::Esc => {
+                model.mode = Mode::Normal;
+                model.drill = None;
                 Action::Redraw
             }
             _ => Action::None,
@@ -341,6 +434,9 @@ pub fn apply_key(model: &mut LiveModel, key: Key) -> Action {
                 model.scrub_idx = None;
                 Action::Redraw
             }
+            // Mode::Drilldown ya se intercepta en el early-return de arriba
+            // (Esc/Left vuelven a Normal y limpian `drill`); no llega hasta aquí.
+            Mode::Drilldown => Action::None,
         },
         Key::Char('q') if model.mode == Mode::Normal => Action::Quit,
         Key::Left if model.mode == Mode::PausaScrub => {
@@ -353,6 +449,25 @@ pub fn apply_key(model: &mut LiveModel, key: Key) -> Action {
             let len = model.samples.len();
             let idx = model.scrub_idx.unwrap_or(0);
             model.scrub_idx = Some(mover_indice(idx, len, 1));
+            Action::Redraw
+        }
+        Key::Right | Key::Char('l')
+            if model.mode == Mode::Normal
+                && matches!(model.focus, Focus::AppsVivo | Focus::AppsHist) =>
+        {
+            if let Some(app) = model.app_seleccionada() {
+                model.drill = Some(Drill {
+                    app,
+                    desde: model.focus,
+                });
+                model.mode = Mode::Drilldown;
+                Action::Redraw
+            } else {
+                Action::None
+            }
+        }
+        Key::Char('r') => {
+            model.hist_range_idx = (model.hist_range_idx + 1) % RANGOS.len();
             Action::Redraw
         }
         Key::Char('p') => {
@@ -1116,5 +1231,127 @@ mod tests {
             m.hist_ifaces, hist_ifaces_antes,
             "hist_ifaces no debe cambiar"
         );
+    }
+
+    #[test]
+    fn hosts_de_app_agrega_por_host_y_ordena() {
+        use caudalghost_core::types::{AppRemoteDelta, Sample};
+        let s = |ts: i64, flows: Vec<(&str, &str, u64, u64)>| Sample {
+            ts,
+            deltas: vec![],
+            apps: vec![],
+            flows: flows
+                .into_iter()
+                .map(|(a, h, rx, tx)| AppRemoteDelta {
+                    app: a.into(),
+                    host: h.into(),
+                    rx,
+                    tx,
+                })
+                .collect(),
+        };
+        let m = LiveModel {
+            samples: vec![
+                s(
+                    0,
+                    vec![
+                        ("firefox", "github.com", 100, 10),
+                        ("firefox", "scdn.co", 5, 5),
+                    ],
+                ),
+                s(
+                    1,
+                    vec![
+                        ("firefox", "github.com", 50, 0),
+                        ("curl", "x.com", 999, 999),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        };
+        let h = m.hosts_de_app("firefox");
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0], ("github.com".to_string(), 150, 10)); // mayor total primero
+        assert!(m.hosts_de_app("desconocida").is_empty());
+    }
+
+    #[test]
+    fn app_seleccionada_por_foco_y_seleccion() {
+        use caudalghost_core::proto::AppRow;
+        let mut m = LiveModel {
+            focus: Focus::AppsHist,
+            hist_apps: vec![
+                AppRow {
+                    app: "mega".into(),
+                    rx: 9_000,
+                    tx: 1,
+                },
+                AppRow {
+                    app: "firefox".into(),
+                    rx: 100,
+                    tx: 1,
+                },
+            ],
+            ..Default::default()
+        };
+        m.selected_row = 1;
+        assert_eq!(m.app_seleccionada().as_deref(), Some("firefox")); // ordenado desc: mega(0), firefox(1)
+        m.focus = Focus::Grafico;
+        assert_eq!(m.app_seleccionada(), None);
+    }
+
+    #[test]
+    fn rango_a_ventana_todo_y_token() {
+        let ahora = chrono::Local::now();
+        assert_eq!(super::rango_a_ventana("todo", ahora), (0, i64::MAX));
+        let (s, e) = super::rango_a_ventana("7d", ahora);
+        assert!(s < e && e <= ahora.timestamp() + 1);
+    }
+
+    #[test]
+    fn apply_key_drill_entra_y_vuelve() {
+        use caudalghost_core::proto::AppRow;
+        let mut m = LiveModel {
+            focus: Focus::AppsHist,
+            hist_apps: vec![AppRow {
+                app: "firefox".into(),
+                rx: 9,
+                tx: 1,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(apply_key(&mut m, Key::Right), Action::Redraw);
+        assert_eq!(m.mode, Mode::Drilldown);
+        assert_eq!(m.drill.as_ref().map(|d| d.app.as_str()), Some("firefox"));
+        assert_eq!(apply_key(&mut m, Key::Left), Action::Redraw);
+        assert_eq!(m.mode, Mode::Normal);
+        assert!(m.drill.is_none());
+        // Esc también sale del drill:
+        apply_key(&mut m, Key::Char('l'));
+        assert_eq!(m.mode, Mode::Drilldown);
+        apply_key(&mut m, Key::Esc);
+        assert_eq!(m.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn apply_key_drill_noop_sin_app_o_foco_no_apps() {
+        let mut m = LiveModel {
+            focus: Focus::Grafico,
+            ..Default::default()
+        };
+        assert_eq!(apply_key(&mut m, Key::Right), Action::None);
+        assert_eq!(m.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn apply_key_r_cicla_rango() {
+        let mut m = LiveModel::default();
+        assert_eq!(m.hist_range_idx, 0);
+        apply_key(&mut m, Key::Char('r'));
+        assert_eq!(m.hist_range_idx, 1);
+        for _ in 0..4 {
+            apply_key(&mut m, Key::Char('r'));
+        }
+        assert_eq!(m.hist_range_idx, 0, "cicla con wrap");
     }
 }

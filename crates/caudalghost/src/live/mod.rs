@@ -45,6 +45,13 @@ pub fn apply_total_apps(model: &mut LiveModel, resp: &Response) {
     }
 }
 
+/// Aplica una respuesta TopRemotes (hosts del drill histórico) al modelo.
+pub fn apply_top_remotes(model: &mut LiveModel, resp: &Response) {
+    if let Response::TopRemotes { rows } = resp {
+        model.drill_hosts = rows.clone();
+    }
+}
+
 /// Restaura la terminal al salir aunque haya panic.
 struct TerminalGuard;
 impl Drop for TerminalGuard {
@@ -123,11 +130,13 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
                     }
                 };
             model.iface_ips = netinfo::read_iface_ipv4s();
+            let (h_start, h_end) =
+                state::rango_a_ventana(state::RANGOS[model.hist_range_idx], chrono::Local::now());
             if let Ok(resp) = crate::client::call(
                 socket,
                 &Request::Total {
-                    start: 0,
-                    end: i64::MAX,
+                    start: h_start,
+                    end: h_end,
                 },
             ) {
                 apply_total_ifaces(&mut model, &resp);
@@ -135,11 +144,27 @@ pub fn run(socket: &Path, window: u32, all: bool) -> anyhow::Result<()> {
             if let Ok(resp) = crate::client::call(
                 socket,
                 &Request::TotalApps {
-                    start: 0,
-                    end: i64::MAX,
+                    start: h_start,
+                    end: h_end,
                 },
             ) {
                 apply_total_apps(&mut model, &resp);
+            }
+            if model.mode == state::Mode::Drilldown {
+                if let Some(d) = model.drill.clone() {
+                    if d.desde == state::Focus::AppsHist {
+                        if let Ok(resp) = crate::client::call(
+                            socket,
+                            &Request::TopRemotes {
+                                start: h_start,
+                                end: h_end,
+                                app: Some(d.app),
+                            },
+                        ) {
+                            apply_top_remotes(&mut model, &resp);
+                        }
+                    }
+                }
             }
             if ok_ping && ok_snapshot {
                 model.reconnect_attempts = 0;
@@ -319,5 +344,21 @@ mod tests {
         };
         mark_disconnected(&mut m);
         assert!(!m.connected);
+    }
+
+    #[test]
+    fn apply_top_remotes_puebla_drill_hosts() {
+        use caudalghost_core::proto::{RemoteRow, Response};
+        let mut m = LiveModel::default();
+        let resp = Response::TopRemotes {
+            rows: vec![RemoteRow {
+                host: "github.com".into(),
+                rx: 10,
+                tx: 1,
+            }],
+        };
+        super::apply_top_remotes(&mut m, &resp);
+        assert_eq!(m.drill_hosts.len(), 1);
+        assert_eq!(m.drill_hosts[0].host, "github.com");
     }
 }

@@ -2,6 +2,19 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.6.3] — 2026-07-03
+
+### TUI (`caudalghost live`)
+
+Drill-down de una app a sus servidores y selector de rango del histórico (cliente-only).
+
+- **Drill-down app→hosts:** con una app seleccionada (`j`/`k`) en `apps · ahora` o `apps · histórico`,
+  `→` / `l` entra a **los servidores a los que consume esa app** (en vivo desde `Sample.flows`; histórico
+  desde `TopRemotes` del rango). `←` / `Esc` vuelve a la lista de apps. El pie muestra el modo `[HOSTS]`.
+- **Selector de rango del histórico:** `r` cicla `todo → hoy → ayer → 7d → 30d`; el rango activo se
+  muestra en los títulos de los paneles de histórico (p. ej. `apps · histórico · 7d`) y afecta a apps e
+  interfaces históricos juntas.
+
 ## [0.6.2] — 2026-07-02
 
 ### Corregido
