@@ -5,5 +5,5 @@ Comment=Monitor de uso de red: qué apps y a qué servidores consume tu conexió
 Exec=caudalghost-gui
 Icon=caudalghost-gui
 Terminal=false
-Categories=Network;Monitor;Utility;
+Categories=Network;Monitor;
 StartupWMClass=caudalghost-gui
