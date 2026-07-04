@@ -2,6 +2,37 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.8.0] — 2026-07-04
+
+### Seguridad — segundo endurecimiento (tras 0.3.0)
+
+Pasada de hardening integral, motivada por una auditoría (gitleaks + semgrep + trivy). **Sin cambios en el
+protocolo ni en el formato de datos**; la base de datos se conserva. No se pierde ningún control ya ganado: un
+test de regresión fija el sandbox de la unit systemd de 0.3.0.
+
+- **Frontera de confianza más robusta (daemon + IPC).** El cliente **acota la respuesta del daemon a 64 MiB**
+  (evita consumo de memoria no acotado si una línea llega gigante). La atribución cgroup→app **descarta
+  etiquetas vacías** (`app-.scope`, `snap.`, `.service` exactos) en vez de mezclar el tráfico de procesos
+  distintos bajo la clave `""` → caen a `comm`/`(desconocido)`.
+- **Test de regresión del sandbox systemd.** Fija los controles de seguridad de 0.3.0 (`User=caudalghost`,
+  `CAP_BPF`/`CAP_PERFMON`, `NoNewPrivileges`, `RestrictAddressFamilies`, `ProtectSystem=strict`, filtro de
+  syscalls) y **veta reintroducir directivas que rompan el eBPF** (`MemoryDenyWriteExecute`, `PrivateUsers`,
+  `DynamicUser`, `ProtectProc=invisible`, denylist de syscalls).
+- **Fuzzing.** Harness `cargo-fuzz` sobre los límites de input no confiable — el parser del protocolo IPC y la
+  atribución cgroup→app — más pruebas adversariales deterministas en el suite. Verificado: **1.58M ejecuciones
+  sin una sola caída**.
+- **Cadena de suministro / CI.** Workflows de **CI** (fmt, clippy, tests; job aparte para el eBPF) y de
+  **seguridad** (`cargo-audit`, `cargo-deny`, `gitleaks`, `semgrep`, `npm audit` de la GUI y un guard de
+  superficie de la GUI). MSRV declarado (`rust-version = 1.96`).
+- **GUI.** Se **niegan explícitamente las devtools internas** (defensa en profundidad; en release ya no se
+  compilan, `features=[]`); las *capabilities* quedan como allowlist mínima de comandos de **solo lectura**.
+- **Builds sin fugas de rutas.** `--remap-path-prefix` en el pipeline de release: los binarios publicados dejan
+  de filtrar el path del equipo de desarrollo (la CLI queda 100% limpia; el daemon solo retiene rutas del blob
+  eBPF, cuyo build anidado no hereda el remap). Un paso hacia builds reproducibles.
+- **Formalización.** `SECURITY.md` (reporte coordinado + modelo de seguridad + riesgos aceptados, **ES/EN**),
+  **modelo de amenazas** (`docs/threat-model.md`) y **página de Seguridad** en el sitio (ES/EN). El riesgo
+  `RUSTSEC-2024-0429` (glib, **solo edición GUI**, bloqueado aguas arriba) queda documentado y **trackeado**.
+
 ## [0.7.4] — 2026-07-04
 
 ### CLI — pulido (cliente-only, sin cambios en el daemon ni el protocolo)
