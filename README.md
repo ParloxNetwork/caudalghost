@@ -8,7 +8,7 @@
 ### El instrumento sereno que mide el caudal de tu red — observa, jamás interfiere.
 
 [![Licencia](https://img.shields.io/badge/licencia-AGPL--3.0-22D3EE)](LICENSE)
-[![Versión](https://img.shields.io/badge/versión-0.7.3-0E7490)](CHANGELOG.md)
+[![Versión](https://img.shields.io/badge/versión-0.7.4-0E7490)](CHANGELOG.md)
 [![Plataforma](https://img.shields.io/badge/Linux-Debian_·_Ubuntu-5A7079)](#-instalación)
 [![Hecho por Parlox Network](https://img.shields.io/badge/hecho_por-Parlox_Network-E3262E)](https://caudalghost.parlox.net)
 
@@ -60,10 +60,10 @@ Dos ediciones `.deb` (Debian/Ubuntu y derivadas):
 
 ```bash
 # Escritorio — daemon + CLI + GUI
-sudo apt install ./caudalghost_0.7.3-1_amd64.deb
+sudo apt install ./caudalghost_0.7.4-1_amd64.deb
 
 # Servidor headless — daemon + CLI (sin GUI)
-sudo apt install ./caudalghost-server_0.7.3-1_amd64.deb
+sudo apt install ./caudalghost-server_0.7.4-1_amd64.deb
 ```
 
 Descarga la última versión en [**Releases**](../../releases) o en [caudalghost.parlox.net](https://caudalghost.parlox.net).
@@ -119,10 +119,10 @@ Two `.deb` editions (Debian/Ubuntu and derivatives):
 
 ```bash
 # Desktop — daemon + CLI + GUI
-sudo apt install ./caudalghost_0.7.3-1_amd64.deb
+sudo apt install ./caudalghost_0.7.4-1_amd64.deb
 
 # Headless server — daemon + CLI (no GUI)
-sudo apt install ./caudalghost-server_0.7.3-1_amd64.deb
+sudo apt install ./caudalghost-server_0.7.4-1_amd64.deb
 ```
 
 Grab the latest build from [**Releases**](../../releases) or [caudalghost.parlox.net](https://caudalghost.parlox.net).
