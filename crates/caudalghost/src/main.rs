@@ -57,6 +57,12 @@ struct OpcionesSalida {
     /// Segundos entre refrescos con --watch.
     #[arg(long, value_name = "SECS", default_value_t = 2)]
     interval: u64,
+    /// Ordena por columna (nombre de cabecera): app/host/interfaz, rx, tx, total. Desc por defecto.
+    #[arg(long, value_name = "CAMPO")]
+    sort: Option<String>,
+    /// Invierte el orden (ascendente); solo/con --sort. No aplica a serie/ping.
+    #[arg(long, short = 'r')]
+    reverse: bool,
 }
 
 impl OpcionesSalida {
@@ -479,6 +485,45 @@ fn fields_para<T: render::Tabulable>(
     Ok(Some(salida.fields.clone()))
 }
 
+/// Compara dos valores crudos: números por magnitud, strings lexicográficamente.
+fn cmp_valor(a: &Option<serde_json::Value>, b: &Option<serde_json::Value>) -> std::cmp::Ordering {
+    use serde_json::Value;
+    match (a, b) {
+        (Some(Value::Number(x)), Some(Value::Number(y))) => {
+            x.as_u64().unwrap_or(0).cmp(&y.as_u64().unwrap_or(0))
+        }
+        (Some(Value::String(x)), Some(Value::String(y))) => x.cmp(y),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+/// Ordena `filas` por `campo` (descendente) si viene; luego, si `reverse`,
+/// invierte el resultado (así `--reverse` solo invierte el orden por defecto).
+fn ordenar_filas<T: render::Proyectable>(filas: &mut [T], campo: Option<&str>, reverse: bool) {
+    if let Some(c) = campo {
+        filas.sort_by(|a, b| cmp_valor(&b.valor_crudo(c), &a.valor_crudo(c)));
+    }
+    if reverse {
+        filas.reverse();
+    }
+}
+
+/// Valida `--sort`/`--reverse` para un comando ordenable de filas `T` y
+/// devuelve `(campo, reverse)`. `T::cabecera()` da los campos válidos.
+fn orden_para<T: render::Tabulable>(
+    salida: &OpcionesSalida,
+) -> Result<(Option<String>, bool), SalidaError> {
+    if let Some(campo) = &salida.sort {
+        if !T::cabecera().iter().any(|c| c == campo) {
+            return Err(SalidaError::Otro(format!(
+                "campo de orden desconocido '{campo}'; válidos: {}",
+                T::cabecera().join(", ")
+            )));
+        }
+    }
+    Ok((salida.sort.clone(), salida.reverse))
+}
+
 /// Imprime la salida de `render::emitir` seguida de su salto de línea final
 /// — pero solo si `s` no está vacío. `emitir` devuelve `""` en `-o csv`/`-o
 /// ndjson` cuando no hay filas (ndjson: `join("\n")` de un iterador vacío);
@@ -500,6 +545,11 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
         Cmd::Ping { salida } => {
             if !salida.fields.is_empty() {
                 return Err(SalidaError::Otro("--fields no aplica a ping".into()));
+            }
+            if salida.sort.is_some() || salida.reverse {
+                return Err(SalidaError::Otro(
+                    "ping no tiene filas que ordenar; --sort/--reverse no aplican".into(),
+                ));
             }
             let resp = llamar(&socket, &Request::Ping)?;
             if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
@@ -529,6 +579,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             salida,
         } => {
             let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
+            if cli.formato() == Formato::Table && (salida.sort.is_some() || salida.reverse) {
+                return Err(SalidaError::Otro(
+                    "--sort/--reverse no aplican a now -o table".into(),
+                ));
+            }
+            let (campo, rev) = orden_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let resp = llamar(&socket, &Request::Snapshot { seconds: *seconds })?;
             rechaza_si_error(&resp)?;
             if let Response::Snapshot { samples } = &resp {
@@ -548,8 +604,10 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     }
                     println!("{}", render::tabla_now(&filas, secs, cli.units()));
                 } else {
+                    let mut filas_maquina = filas_now_maquina(samples, *all);
+                    ordenar_filas(&mut filas_maquina, campo.as_deref(), rev);
                     imprimir(&render::emitir(
-                        &filas_now_maquina(samples, *all),
+                        &filas_maquina,
                         cli.formato(),
                         cli.units(),
                         cli.quiet(),
@@ -564,6 +622,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
         }
         Cmd::Total { rango, all, salida } => {
             let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
+            let (campo, rev) = orden_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -574,11 +633,12 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             )?;
             rechaza_si_error(&resp)?;
             if let Response::Total { rows } = &resp {
-                let filtradas: Vec<_> = rows
+                let mut filtradas: Vec<_> = rows
                     .iter()
                     .filter(|r| *all || r.iface != "lo")
                     .cloned()
                     .collect();
+                ordenar_filas(&mut filtradas, campo.as_deref(), rev);
                 imprimir(&render::emitir(
                     &filtradas,
                     cli.formato(),
@@ -599,6 +659,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             ..
         } => {
             let fields = fields_para::<caudalghost_core::proto::AppRow>(salida)?;
+            let (campo, rev) = orden_para::<caudalghost_core::proto::AppRow>(salida)?;
             let rango = rango_de_top(cli);
             match (rango, seconds) {
                 (Some(rango), None) => {
@@ -614,6 +675,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     if let Response::TotalApps { rows } = &resp {
                         let mut ordenadas = rows.clone();
                         ordenadas.sort_by_key(|r| std::cmp::Reverse(r.rx + r.tx));
+                        ordenar_filas(&mut ordenadas, campo.as_deref(), rev);
                         imprimir(&render::emitir(
                             &ordenadas,
                             cli.formato(),
@@ -633,10 +695,11 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     rechaza_si_error(&resp)?;
                     if let Response::Snapshot { samples } = &resp {
                         let filas = agrega_apps(samples);
-                        let rows: Vec<caudalghost_core::proto::AppRow> = filas
+                        let mut rows: Vec<caudalghost_core::proto::AppRow> = filas
                             .into_iter()
                             .map(|(app, rx, tx)| caudalghost_core::proto::AppRow { app, rx, tx })
                             .collect();
+                        ordenar_filas(&mut rows, campo.as_deref(), rev);
                         let etiqueta = format!("últimos {seconds} s");
                         imprimir(&render::emitir(
                             &rows,
@@ -661,6 +724,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             salida,
         } => {
             let fields = fields_para::<caudalghost_core::proto::RemoteRow>(salida)?;
+            let (campo, rev) = orden_para::<caudalghost_core::proto::RemoteRow>(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -680,6 +744,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                 }
                 let mut ordenados = rows.clone();
                 ordenados.sort_by_key(|r| std::cmp::Reverse(r.rx + r.tx));
+                ordenar_filas(&mut ordenados, campo.as_deref(), rev);
                 let etiqueta = match app {
                     Some(a) => format!("🌐 hosts · {a} · rango: {rango}"),
                     None => format!("🌐 hosts · rango: {rango}"),
@@ -702,6 +767,11 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
             bucket,
             salida,
         } => {
+            if salida.sort.is_some() || salida.reverse {
+                return Err(SalidaError::Otro(
+                    "serie es cronológica; no admite --sort/--reverse".into(),
+                ));
+            }
             let fields = fields_para::<render::SerieRow>(salida)?;
             let w = resolver_rango(rango)?;
             let bucket = bucket.map(Bucket::from).unwrap_or_else(|| {
@@ -1366,5 +1436,160 @@ mod tests {
         assert!(Cli::try_parse_from(["caudalghost", "serie", "hoy", "--watch"]).is_ok());
         assert!(Cli::try_parse_from(["caudalghost", "live", "--watch"]).is_err());
         // live no lleva OpcionesSalida
+    }
+
+    #[test]
+    fn cmp_valor_numeros_y_strings() {
+        use serde_json::json;
+        use std::cmp::Ordering;
+        assert_eq!(
+            super::cmp_valor(&Some(json!(10)), &Some(json!(2))),
+            Ordering::Greater
+        );
+        assert_eq!(
+            super::cmp_valor(&Some(json!("a")), &Some(json!("b"))),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn ordenar_filas_desc_y_reverse() {
+        use caudalghost_core::proto::AppRow;
+        let mut v = vec![
+            AppRow {
+                app: "a".into(),
+                rx: 1,
+                tx: 0,
+            }, // total 1
+            AppRow {
+                app: "b".into(),
+                rx: 30,
+                tx: 0,
+            }, // total 30
+            AppRow {
+                app: "c".into(),
+                rx: 10,
+                tx: 0,
+            }, // total 10
+        ];
+        super::ordenar_filas(&mut v, Some("total"), false); // desc
+        assert_eq!(
+            v.iter().map(|r| r.app.clone()).collect::<Vec<_>>(),
+            ["b", "c", "a"]
+        );
+        super::ordenar_filas(&mut v, Some("total"), true); // asc (reverse)
+        assert_eq!(
+            v.iter().map(|r| r.app.clone()).collect::<Vec<_>>(),
+            ["a", "c", "b"]
+        );
+        // por nombre desc
+        super::ordenar_filas(&mut v, Some("app"), false);
+        assert_eq!(
+            v.iter().map(|r| r.app.clone()).collect::<Vec<_>>(),
+            ["c", "b", "a"]
+        );
+    }
+
+    #[test]
+    fn orden_para_valida_campo_y_rechaza_serie() {
+        // top acepta app/rx/tx/total; campo inválido -> error
+        let ok = Cli::try_parse_from(["caudalghost", "top", "hoy", "--sort", "total"]);
+        assert!(ok.is_ok());
+        let malo = Cli::try_parse_from(["caudalghost", "top", "hoy", "--sort", "noexiste"]);
+        assert!(malo.is_ok()); // clap parsea; el error es de negocio, se prueba en run() abajo
+                               // serie con --sort -> parsea pero run() debe rechazar (probado en Step de integración)
+        assert!(Cli::try_parse_from(["caudalghost", "serie", "hoy", "--sort", "total"]).is_ok());
+        assert!(Cli::try_parse_from(["caudalghost", "top", "hoy", "--reverse"]).is_ok());
+    }
+
+    #[test]
+    fn top_ordena_por_rx_asc_con_reverse_en_csv() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("f.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut l = String::new();
+            reader.read_line(&mut l).unwrap();
+            let mut s = stream;
+            s.write_all(b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"a\",\"rx\":50,\"tx\":0},{\"app\":\"b\",\"rx\":10,\"tx\":0},{\"app\":\"c\",\"rx\":30,\"tx\":0}]}\n")
+                .unwrap();
+        });
+        let cli = Cli::try_parse_from([
+            "caudalghost",
+            "--socket",
+            sock.to_str().unwrap(),
+            "top",
+            "hoy",
+            "-o",
+            "csv",
+            "--sort",
+            "rx",
+            "--reverse",
+        ])
+        .unwrap();
+        // Solo verificamos que corre sin error; el orden se prueba vía ordenar_filas
+        // directamente arriba (esta prueba cubre el wiring end-to-end).
+        run(&cli).expect("top csv --sort rx --reverse no debe fallar");
+    }
+
+    #[test]
+    fn serie_rechaza_sort_y_reverse() {
+        let cli = Cli::try_parse_from(["caudalghost", "serie", "hoy", "--sort", "total"]).unwrap();
+        let err = run(&cli).expect_err("serie con --sort debe rechazar");
+        assert!(err.mensaje_humano().contains("cronológica"));
+
+        let cli2 = Cli::try_parse_from(["caudalghost", "serie", "hoy", "--reverse"]).unwrap();
+        let err2 = run(&cli2).expect_err("serie con --reverse debe rechazar");
+        assert!(err2.mensaje_humano().contains("cronológica"));
+    }
+
+    #[test]
+    fn ping_rechaza_sort_y_reverse() {
+        let cli = Cli::try_parse_from(["caudalghost", "ping", "--sort", "total"]).unwrap();
+        let err = run(&cli).expect_err("ping con --sort debe rechazar");
+        assert!(err.mensaje_humano().contains("sort") || err.mensaje_humano().contains("orden"));
+    }
+
+    #[test]
+    fn now_table_rechaza_sort_y_reverse() {
+        let cli = Cli::try_parse_from(["caudalghost", "now", "--sort", "rx"]).unwrap();
+        let err = run(&cli).expect_err("now -o table con --sort debe rechazar");
+        assert!(err.mensaje_humano().contains("now -o table"));
+    }
+
+    #[test]
+    fn orden_para_rechaza_campo_desconocido_en_run() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("f.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut l = String::new();
+            reader.read_line(&mut l).unwrap();
+            let mut s = stream;
+            s.write_all(
+                b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"a\",\"rx\":50,\"tx\":0}]}\n",
+            )
+            .unwrap();
+        });
+        let cli = Cli::try_parse_from([
+            "caudalghost",
+            "--socket",
+            sock.to_str().unwrap(),
+            "top",
+            "hoy",
+            "--sort",
+            "noexiste",
+        ])
+        .unwrap();
+        let err = run(&cli).expect_err("campo de orden desconocido debe rechazar");
+        assert!(err.mensaje_humano().contains("noexiste"));
     }
 }
