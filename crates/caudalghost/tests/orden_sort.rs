@@ -34,7 +34,9 @@ fn run_bin(response: &[u8], args: &[&str]) -> Output {
         .args(&full)
         .output()
         .expect("spawnear caudalghost");
-    handle.join().expect("hilo del daemon fake no debe entrar en pánico");
+    handle
+        .join()
+        .expect("hilo del daemon fake no debe entrar en pánico");
     out
 }
 
@@ -59,7 +61,10 @@ const TOP: &[u8] =
 /// `top --sort rx` = descendente (b=30, c=10, a=1). Prueba el wiring de `top` histórico.
 #[test]
 fn top_sort_rx_descendente() {
-    let out = run_bin(TOP, &["top", "hoy", "--sort", "rx", "-o", "csv", "--no-color"]);
+    let out = run_bin(
+        TOP,
+        &["top", "hoy", "--sort", "rx", "-o", "csv", "--no-color"],
+    );
     assert_eq!(nombres_csv(&out), ["b", "c", "a"]);
 }
 
@@ -69,7 +74,16 @@ fn top_sort_rx_descendente() {
 fn top_sort_rx_reverse_ascendente() {
     let out = run_bin(
         TOP,
-        &["top", "hoy", "--sort", "rx", "--reverse", "-o", "csv", "--no-color"],
+        &[
+            "top",
+            "hoy",
+            "--sort",
+            "rx",
+            "--reverse",
+            "-o",
+            "csv",
+            "--no-color",
+        ],
     );
     assert_eq!(nombres_csv(&out), ["a", "c", "b"]);
 }
@@ -78,7 +92,10 @@ fn top_sort_rx_reverse_ascendente() {
 #[test]
 fn hosts_sort_host_descendente() {
     let resp = b"{\"type\":\"top_remotes\",\"rows\":[{\"host\":\"x\",\"rx\":5,\"tx\":0},{\"host\":\"z\",\"rx\":5,\"tx\":0},{\"host\":\"y\",\"rx\":5,\"tx\":0}]}\n";
-    let out = run_bin(resp, &["hosts", "hoy", "--sort", "host", "-o", "csv", "--no-color"]);
+    let out = run_bin(
+        resp,
+        &["hosts", "hoy", "--sort", "host", "-o", "csv", "--no-color"],
+    );
     assert_eq!(nombres_csv(&out), ["z", "y", "x"]);
 }
 
@@ -88,7 +105,16 @@ fn total_sort_total_reverse_ascendente() {
     let resp = b"{\"type\":\"total\",\"rows\":[{\"iface\":\"eth0\",\"rx\":1,\"tx\":0},{\"iface\":\"wlan0\",\"rx\":30,\"tx\":0},{\"iface\":\"enp0\",\"rx\":10,\"tx\":0}]}\n";
     let out = run_bin(
         resp,
-        &["total", "hoy", "--sort", "total", "--reverse", "-o", "csv", "--no-color"],
+        &[
+            "total",
+            "hoy",
+            "--sort",
+            "total",
+            "--reverse",
+            "-o",
+            "csv",
+            "--no-color",
+        ],
     );
     assert_eq!(nombres_csv(&out), ["eth0", "enp0", "wlan0"]);
 }
