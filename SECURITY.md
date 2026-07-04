@@ -54,6 +54,13 @@ Por honestidad, los documentamos en vez de esconderlos:
 - **Colisión de etiqueta de app muy larga.** Los nombres de app se acotan (128 caracteres); dos apps que
   compartan un prefijo larguísimo podrían agregarse bajo la misma etiqueta. Baja probabilidad, afecta a la
   precisión, no a la seguridad.
+- **CSP de la GUI con `'unsafe-inline'`.** La WebView carga **solo** activos empaquetados —sin orígenes remotos
+  (`connect-src` a `'self'`/`ipc:`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`)— pero la
+  CSP mantiene `'unsafe-inline'` en `style-src`/`script-src` porque los estilos dinámicos de las barras y la
+  hidratación de SvelteKit lo requieren hoy. Mitigaciones: las devtools **no** se compilan en release
+  (`features=[]`) y se **niegan** explícitamente en las *capabilities*; estas son una allowlist mínima de
+  comandos de **solo lectura**. Endurecer la CSP a hashes/nonces está **planeado** (requiere validación manual
+  en WebKitGTK antes de shippear).
 
 ---
 
@@ -105,3 +112,9 @@ request must never crash the daemon (at most it closes that connection).
   mis-attribute traffic. A known limitation, not a security flaw.
 - **Very long app-label collision** — app names are capped (128 chars); two apps sharing a very long prefix
   could aggregate under one label. Low probability; affects precision, not security.
+- **GUI CSP with `'unsafe-inline'`** — the WebView loads **only** bundled assets (no remote origins:
+  `connect-src` to `'self'`/`ipc:`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`), but the
+  CSP keeps `'unsafe-inline'` on `style-src`/`script-src` because the dynamic bar styles and SvelteKit hydration
+  currently need it. Mitigations: devtools are **not** compiled in release (`features=[]`) and explicitly
+  **denied** in the capabilities, which are a minimal allowlist of **read-only** commands. Tightening the CSP to
+  hashes/nonces is **planned** (needs manual WebKitGTK validation before shipping).
