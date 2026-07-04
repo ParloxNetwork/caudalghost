@@ -55,8 +55,12 @@ fn nombres_csv(out: &Output) -> Vec<String> {
         .collect()
 }
 
+// `a` lleva tx alto (total 101) para que el orden por `total` (default) difiera
+// del orden por `rx`: así CADA test de `top` discrimina un wiring caído (si se
+// cayera `ordenar_filas`, la salida volvería al default total-desc [a,b,c], que
+// NO coincide con ninguno de los órdenes aserados por rx).
 const TOP: &[u8] =
-    b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"a\",\"rx\":1,\"tx\":0},{\"app\":\"b\",\"rx\":30,\"tx\":0},{\"app\":\"c\",\"rx\":10,\"tx\":0}]}\n";
+    b"{\"type\":\"total_apps\",\"rows\":[{\"app\":\"a\",\"rx\":1,\"tx\":100},{\"app\":\"b\",\"rx\":30,\"tx\":0},{\"app\":\"c\",\"rx\":10,\"tx\":0}]}\n";
 
 /// `top --sort rx` = descendente (b=30, c=10, a=1). Prueba el wiring de `top` histórico.
 #[test]
