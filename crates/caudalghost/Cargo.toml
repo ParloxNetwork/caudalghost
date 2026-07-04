@@ -3,6 +3,8 @@ name = "caudalghost"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+description = "Cliente de CaudalGhost: CLI de un disparo (scriptable) y TUI en vivo (caudalghost live)"
 
 [dependencies]
 caudalghost-core = { path = "../caudalghost-core" }

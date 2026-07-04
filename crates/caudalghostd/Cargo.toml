@@ -3,6 +3,9 @@ name = "caudalghostd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+# Síntesis corta del .deb (lo que ve la gente en `apt show` / los software centers).
+description = "Monitor de uso de red por aplicación y servidor (telemetría eBPF, solo observa)"
 homepage = "https://caudalghost.parlox.net"
 
 [dependencies]

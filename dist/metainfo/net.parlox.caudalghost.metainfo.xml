@@ -13,6 +13,19 @@
       solo observa, no es un firewall y nada llama a casa.
     </p>
   </description>
+  <categories>
+    <category>Network</category>
+    <category>Monitor</category>
+  </categories>
+  <keywords>
+    <keyword>red</keyword>
+    <keyword>network</keyword>
+    <keyword>monitor</keyword>
+    <keyword>ancho de banda</keyword>
+    <keyword>bandwidth</keyword>
+    <keyword>tráfico</keyword>
+    <keyword>eBPF</keyword>
+  </keywords>
   <launchable type="desktop-id">caudalghost-gui.desktop</launchable>
   <url type="homepage">https://caudalghost.parlox.net</url>
   <developer id="net.parlox">
@@ -21,5 +34,17 @@
   <provides>
     <binary>caudalghost-gui</binary>
   </provides>
+  <releases>
+    <release version="0.7.3" date="2026-07-03">
+      <description>
+        <p>Página del proyecto y metadatos del paquete para los software centers.</p>
+      </description>
+    </release>
+    <release version="0.7.2" date="2026-07-03">
+      <description>
+        <p>CLI: comando «serie» (evolución del caudal), proyección de columnas y refresco en vivo.</p>
+      </description>
+    </release>
+  </releases>
   <content_rating type="oars-1.1" />
 </component>

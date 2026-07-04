@@ -14,6 +14,7 @@ use std::path::PathBuf;
 #[command(
     name = "caudalghost",
     version = long_version(),
+    author = "Parlox Network <jonathan@parlox.net>",
     after_help = "Ejemplos:\n  \
                   caudalghost total hoy -o csv\n  \
                   caudalghost top 7d -n 10\n  \

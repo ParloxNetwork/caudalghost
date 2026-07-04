@@ -16,9 +16,10 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.7.2"
+version = "0.7.3"
 edition = "2021"
 license = "AGPL-3.0-only"
+authors = ["Parlox Network <jonathan@parlox.net>"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
