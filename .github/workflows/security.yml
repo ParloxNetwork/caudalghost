@@ -1,0 +1,154 @@
+name: Security
+
+# Supply-chain y análisis estático. Ningún job de este workflow construye el
+# workspace (nada de aya-build / eBPF / nightly aquí): son checks estáticos
+# sobre manifiestos, lockfiles y fuentes. Corre en push, PR y semanalmente
+# (para detectar advisories nuevas contra el mismo código).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Lunes 06:00 UTC — deriva de vulnerabilidades publicadas después del
+    # último push (RUSTSEC, GHSA, etc.) sin depender de nueva actividad.
+    - cron: "0 6 * * 1"
+
+jobs:
+  cargo-audit:
+    name: cargo-audit (RUSTSEC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Instalar cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit (usa audit.toml del repo)
+        run: cargo audit
+
+  cargo-deny:
+    name: cargo-deny (licencias, bans, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Corre sobre el workspace principal (Cargo.toml raíz / default-members).
+      # El GUI (crates/caudalghost-gui/src-tauri) tiene su propio Cargo.lock,
+      # fuera de este workspace, y se audita aparte (ver job npm-audit-gui).
+      - name: cargo-deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --workspace
+
+  gitleaks:
+    name: gitleaks (secretos)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No requerido para repos públicos; si en algún momento se exige
+          # licencia (repos de organización privados), añadir el secret
+          # GITLEAKS_LICENSE en la configuración del repo/org.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  semgrep:
+    name: semgrep (SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Semgrep (p/rust + p/secrets)
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/rust
+            p/secrets
+
+  npm-audit-gui:
+    name: npm audit (GUI, Tauri frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/caudalghost-gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: crates/caudalghost-gui/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: npm audit --omit=dev
+        # No hard-fail todavía: se deja como aviso mientras se calibra el
+        # umbral (severidad/allowlist) para el frontend de la GUI.
+        continue-on-error: true
+        run: npm audit --omit=dev
+
+  gui-surface-guard:
+    name: GUI surface guard (anti-regresión de superficie minimizada)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verificar que la superficie de la GUI sigue minimizada
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fail=0
+
+          conf="crates/caudalghost-gui/src-tauri/tauri.conf.json"
+          caps="crates/caudalghost-gui/src-tauri/capabilities/default.json"
+          manifest="crates/caudalghost-gui/src-tauri/Cargo.toml"
+
+          if [ -f "$conf" ] && grep -q "unsafe-eval" "$conf"; then
+            echo "::error file=$conf::CSP de la GUI contiene 'unsafe-eval'; la superficie ya no está minimizada."
+            fail=1
+          fi
+
+          if [ -f "$caps" ]; then
+            for perm in "core:shell" "core:fs" "core:http" "allow-create-webview"; do
+              if grep -q "$perm" "$caps"; then
+                echo "::error file=$caps::La GUI ganó el permiso peligroso '$perm'; revisar si es intencional."
+                fail=1
+              fi
+            done
+          fi
+
+          if [ -f "$manifest" ] && grep -qE '^\s*tauri-plugin-' "$manifest"; then
+            echo "::error file=$manifest::Se añadió una dependencia tauri-plugin-*; la GUI se diseñó sin plugins de Tauri."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "gui-surface-guard: regresión detectada en la superficie de la GUI."
+            exit 1
+          fi
+
+          echo "gui-surface-guard: OK (sin unsafe-eval, sin permisos peligrosos nuevos, sin tauri-plugin-*)."

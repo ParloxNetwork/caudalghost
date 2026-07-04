@@ -1,0 +1,18 @@
+# Configuración de cargo-audit (RUSTSEC advisories sobre Cargo.lock).
+# Leído automáticamente por `cargo audit` al correr desde la raíz del repo.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2024-0429: unsoundness en glib::VariantStrIter (glib 0.18.5).
+    # Dependencia TRANSITIVA solo de la edición GUI (Tauri/gtk-rs); el
+    # daemon, el CLI/TUI y la edición servidor no enlazan glib en absoluto.
+    # El arreglo (glib >= 0.20) está bloqueado aguas arriba: wry fija
+    # webkit2gtk=2.0.2 / gtk=0.18, y forzar glib rompería esa combinación.
+    # Nuestro código propio de la GUI no usa `glib::VariantStrIter`, así que
+    # la explotabilidad práctica se limita a la ruta interna de gtk-rs/
+    # webkit2gtk. Se ignora aquí para no bloquear CI/releases en un finding
+    # que no podemos arreglar localmente; trackeado en SECURITY.md
+    # ("Riesgos conocidos y aceptados" / "Known & accepted risks"), y se
+    # revisará cuando Tauri/wry migren su pila gtk-rs.
+    "RUSTSEC-2024-0429",
+]

@@ -20,6 +20,7 @@ version = "0.7.4"
 edition = "2021"
 license = "AGPL-3.0-only"
 authors = ["Parlox Network <jonathan@parlox.net>"]
+rust-version = "1.96"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
