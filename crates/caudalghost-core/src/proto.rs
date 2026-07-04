@@ -263,4 +263,34 @@ mod tests {
         assert_eq!(Bucket::Hour.secs(), 3_600);
         assert_eq!(Bucket::Day.secs(), 86_400);
     }
+
+    /// El parser del protocolo es el límite de input NO confiable (una línea del
+    /// socket). Ante entradas adversariales NUNCA debe paniquear (a lo sumo
+    /// devuelve `Err`). Red de regresión determinista; el fuzzing profundo vive
+    /// en `fuzz/` (cargo-fuzz).
+    #[test]
+    fn parser_no_paniquea_con_entradas_adversariales() {
+        let anidado = "[".repeat(600); // recursión profunda → serde corta con Err, sin desbordar la pila
+        let casos: Vec<String> = vec![
+            "".into(),
+            "{}".into(),
+            "null".into(),
+            "[]".into(),
+            "not json".into(),
+            "\u{feff}{}".into(), // BOM
+            "{\"cmd\":\"desconocido\"}".into(),
+            "{\"cmd\":\"total\",\"start\":99999999999999999999999,\"end\":-99999999999999}".into(),
+            "{\"cmd\":\"series\",\"start\":0,\"end\":0,\"bucket\":\"siglo\"}".into(),
+            "{\"cmd\":\"top_remotes\",\"start\":0,\"end\":0,\"app\":\"\\u0000\\u0000\"}".into(),
+            "{\"cmd\":\"snapshot\",\"seconds\":null}".into(),
+            "{\"cmd\":".into(), // truncado
+            "{\"type\":\"snapshot\",\"samples\":[]} basura extra".into(),
+            anidado,
+        ];
+        for c in &casos {
+            // El Ok/Err da igual: lo que se prueba es que NO paniquea.
+            let _ = serde_json::from_str::<Request>(c);
+            let _ = serde_json::from_str::<Response>(c);
+        }
+    }
 }

@@ -43,8 +43,9 @@ sd-notify = "0.4"
 posix-acl = "1.2"
 
 [profile.release]
-# Strip de símbolos: binarios shippeados más pequeños y sin tabla de símbolos
-# (H-9b). Nota: el remapeo completo de rutas de build embebidas en literales
-# (panics de deps con /home/<dev>/.cargo/...) requeriría `trim-paths` (nightly en
-# Cargo 1.96) o `--remap-path-prefix` en el pipeline de build; queda recomendado.
+# Strip de símbolos: binarios shippeados más pequeños y sin tabla de símbolos (H-9b).
 strip = true
+# El remapeo de rutas embebidas (para no filtrar /home/<dev>/.cargo/... ni el path
+# del proyecto en los binarios PÚBLICOS) se aplica con `--remap-path-prefix` vía
+# RUSTFLAGS en scripts/build-debs.sh (el pipeline de release). El `trim-paths` de
+# [profile] todavía es inestable en este Cargo (avisa y lo ignora en canal stable).

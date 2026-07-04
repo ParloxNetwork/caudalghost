@@ -20,6 +20,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Remapeo de rutas embebidas: los binarios PÚBLICOS de las .deb no deben filtrar
+# /home/<dev>/.cargo/... ni el path del proyecto (fuga del usuario del dev) — y es
+# un paso hacia builds reproducibles. Mapea el HOME del dev a un prefijo neutro en
+# TODA la compilación de release (daemon, CLI y GUI). Preserva RUSTFLAGS previo.
+export RUSTFLAGS="--remap-path-prefix=$HOME=/home/build ${RUSTFLAGS:-}"
+
 target="${1:-both}"
 
 build_binaries() {

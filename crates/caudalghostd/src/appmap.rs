@@ -184,6 +184,34 @@ mod tests {
         );
     }
 
+    /// `app_from_cgroup` parsea rutas de cgroup (semi-no-confiable: un proceso
+    /// puede disponer su cgroup). Es pura; ante entradas raras NUNCA debe
+    /// paniquear ni colgarse. Red de regresión; el fuzzing vive en `fuzz/`.
+    #[test]
+    fn app_from_cgroup_no_paniquea_con_entradas_raras() {
+        let gigante = format!("0::/app-{}.scope", "a".repeat(10_000));
+        let casos: Vec<String> = vec![
+            "".into(),
+            "0::".into(),
+            "0::/".into(),
+            "0:://////".into(),
+            "0::/app-".into(),
+            "0::/snap.".into(),
+            "0::/.service".into(),
+            "0::/app-flatpak-.scope".into(),
+            "0::/app-@.service".into(),
+            "0::/app-a@b@c-1d.scope".into(),
+            "0::/app-\\x2d\\x2d.scope".into(),
+            "0::/💥.service".into(),
+            "0::/app-\u{0}\u{1b}.scope".into(),
+            "sin-prefijo-0::".into(),
+            gigante,
+        ];
+        for c in &casos {
+            let _ = super::app_from_cgroup(c); // no debe paniquear
+        }
+    }
+
     /// Casos límite que antes producían `Some("")` (mezclando tráfico de procesos
     /// distintos bajo la clave vacía) ahora devuelven `None` → caen a
     /// comm/(desconocido). Preserva la pureza de la función.
