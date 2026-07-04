@@ -311,7 +311,10 @@ fn csv_campo(s: &str) -> String {
 /// las pedidas (en el orden pedido); `table` lo ignora (nunca se llama con
 /// `fields=Some` para tabla). Con `fields=None` la salida es idéntica a la de
 /// siempre (cero cambio de contrato cuando no se pide proyección).
-// Punto único de salida: agrupa formato/unidades/quiet/color/título/limit/fields
+///
+/// `no_header`, si es `true`, omite la línea de cabecera en `-o csv` (para
+/// pipelines que no la quieren); no afecta a table/json/ndjson.
+// Punto único de salida: agrupa formato/unidades/quiet/color/título/limit/fields/no_header
 // deliberadamente en una sola función; empaquetarlos en un struct no aporta claridad.
 #[allow(clippy::too_many_arguments)]
 pub fn emitir<T: Tabulable + ConRxTx + Serialize + Proyectable>(
@@ -323,6 +326,7 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize + Proyectable>(
     titulo_txt: &str,
     limit: Option<usize>,
     fields: Option<&[String]>,
+    no_header: bool,
 ) -> String {
     // `limit` acota las filas mostradas/emitidas en TODOS los formatos. En Table la fila
     // `Σ total` sigue sumando TODAS (total real); los formatos máquina emiten solo las visibles.
@@ -400,26 +404,25 @@ pub fn emitir<T: Tabulable + ConRxTx + Serialize + Proyectable>(
                     .collect(),
                 None => (0..cab.len()).collect(),
             };
-            let mut out = String::new();
-            out.push_str(
-                &idxs
-                    .iter()
-                    .map(|&i| csv_campo(cab[i]))
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
+            let mut lineas: Vec<String> = Vec::new();
+            if !no_header {
+                lineas.push(
+                    idxs.iter()
+                        .map(|&i| csv_campo(cab[i]))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
             for fila in visibles {
                 let campos = fila.campos(units);
-                out.push('\n');
-                out.push_str(
-                    &idxs
-                        .iter()
+                lineas.push(
+                    idxs.iter()
                         .map(|&i| csv_campo(&campos[i]))
                         .collect::<Vec<_>>()
                         .join(","),
                 );
             }
-            out
+            lineas.join("\n")
         }
         Formato::Ndjson => match fields {
             Some(cols) => visibles
@@ -499,6 +502,7 @@ mod tests {
             "hoy",
             None,
             None,
+            false,
         );
         assert!(s.contains("firefox") && s.contains("Σ total"));
     }
@@ -527,6 +531,7 @@ mod tests {
             "7d",
             None,
             None,
+            false,
         );
         assert!(s.contains("github.com") && s.contains("scdn.co") && s.contains("Σ total"));
     }
@@ -602,6 +607,7 @@ mod tests {
             "total",
             None,
             None,
+            false,
         );
         assert!(bin.contains("MiB"));
         let bits = super::emitir(
@@ -613,6 +619,7 @@ mod tests {
             "total",
             None,
             None,
+            false,
         );
         assert!(bits.contains("Mb") && !bits.contains("MiB"));
     }
@@ -650,6 +657,7 @@ mod tests {
             "top",
             None,
             None,
+            false,
         );
         assert!(csv.lines().next().unwrap().contains("app")); // cabecera
         assert!(csv.contains("firefox"));
@@ -662,6 +670,7 @@ mod tests {
             "top",
             None,
             None,
+            false,
         );
         assert_eq!(nd.lines().count(), 2); // una fila por línea
         assert!(nd.lines().next().unwrap().starts_with('{'));
@@ -691,6 +700,7 @@ mod tests {
             "top",
             None,
             None,
+            false,
         );
         // la columna rx queda alineada: el '1 B' de la primera fila lleva padding a la izquierda
         assert!(t.contains("  1 B") || t.contains(" 1 B "));
@@ -728,6 +738,7 @@ mod tests {
             "top",
             Some(1),
             None,
+            false,
         );
         assert!(s.contains("firefox"), "debe mostrar la primera fila");
         assert!(!s.contains("curl"), "no debe mostrar filas fuera del limit");
@@ -768,6 +779,7 @@ mod tests {
             "top",
             Some(2),
             None,
+            false,
         );
         assert_eq!(nd.lines().count(), 2, "ndjson respeta el limit: {nd}");
         assert!(nd.contains("firefox") && nd.contains("curl") && !nd.contains("ssh"));
@@ -780,6 +792,7 @@ mod tests {
             "top",
             Some(1),
             None,
+            false,
         );
         assert_eq!(csv.lines().count(), 2, "csv = cabecera + 1 fila: {csv}"); // header + 1
         assert!(csv.contains("firefox") && !csv.contains("ssh"));
@@ -792,6 +805,7 @@ mod tests {
             "top",
             Some(1),
             None,
+            false,
         );
         assert!(json.contains("firefox") && !json.contains("curl") && !json.contains("ssh"));
     }
@@ -876,6 +890,7 @@ mod tests {
             "t",
             None,
             None,
+            false,
         );
         assert_eq!(antes, "{\"app\":\"a\",\"rx\":1,\"tx\":2}");
     }
@@ -898,6 +913,7 @@ mod tests {
             "t",
             None,
             Some(&cols),
+            false,
         );
         let mut lineas = csv.lines();
         assert_eq!(lineas.next().unwrap(), "total,app"); // orden pedido
@@ -922,6 +938,7 @@ mod tests {
             "t",
             None,
             Some(&cols),
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&nd).unwrap();
         assert_eq!(v["app"], "a");
@@ -951,9 +968,60 @@ mod tests {
             "t",
             None,
             Some(&cols),
+            false,
         );
         let v: serde_json::Value = serde_json::from_str(&nd).unwrap();
         assert_eq!(v["interfaz"], "eth0", "la interfaz no debe dropearse: {nd}");
         assert_eq!(v["total"], 120);
+    }
+
+    #[test]
+    fn emitir_csv_no_header_omite_cabecera() {
+        use caudalghost_core::proto::AppRow;
+        let filas = vec![AppRow {
+            app: "a".into(),
+            rx: 1,
+            tx: 2,
+        }];
+        // con cabecera (comportamiento actual, no_header=false)
+        let con = super::emitir(
+            &filas,
+            Formato::Csv,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            None,
+            false,
+        );
+        assert_eq!(con.lines().next().unwrap(), "app,rx,tx,total");
+        // sin cabecera
+        let sin = super::emitir(
+            &filas,
+            Formato::Csv,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            None,
+            true,
+        );
+        assert_eq!(sin.lines().count(), 1);
+        assert!(sin.starts_with("a,"));
+        // sin cabecera y sin filas -> 0 bytes
+        let vacio = super::emitir::<AppRow>(
+            &[],
+            Formato::Csv,
+            UnitMode::Binary,
+            true,
+            false,
+            "t",
+            None,
+            None,
+            true,
+        );
+        assert_eq!(vacio, "");
     }
 }

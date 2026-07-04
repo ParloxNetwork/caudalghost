@@ -63,6 +63,9 @@ struct OpcionesSalida {
     /// Invierte el orden (ascendente); solo/con --sort. No aplica a serie/ping.
     #[arg(long, short = 'r')]
     reverse: bool,
+    /// Omite la cabecera en -o csv
+    #[arg(long)]
+    no_header: bool,
 }
 
 impl OpcionesSalida {
@@ -524,6 +527,14 @@ fn orden_para<T: render::Tabulable>(
     Ok((salida.sort.clone(), salida.reverse))
 }
 
+/// `--no-header` solo aplica a -o csv; fuera de csv, error claro.
+fn no_header_para(salida: &OpcionesSalida) -> Result<bool, SalidaError> {
+    if salida.no_header && salida.formato() != Formato::Csv {
+        return Err(SalidaError::Otro("--no-header solo aplica a -o csv".into()));
+    }
+    Ok(salida.no_header)
+}
+
 /// Imprime la salida de `render::emitir` seguida de su salto de línea final
 /// — pero solo si `s` no está vacío. `emitir` devuelve `""` en `-o csv`/`-o
 /// ndjson` cuando no hay filas (ndjson: `join("\n")` de un iterador vacío);
@@ -550,6 +561,9 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                 return Err(SalidaError::Otro(
                     "ping no tiene filas que ordenar; --sort/--reverse no aplican".into(),
                 ));
+            }
+            if salida.no_header {
+                return Err(SalidaError::Otro("--no-header solo aplica a -o csv".into()));
             }
             let resp = llamar(&socket, &Request::Ping)?;
             if matches!(cli.formato(), Formato::Csv | Formato::Ndjson) {
@@ -585,6 +599,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                 ));
             }
             let (campo, rev) = orden_para::<caudalghost_core::proto::TotalRow>(salida)?;
+            let no_header = no_header_para(salida)?;
             let resp = llamar(&socket, &Request::Snapshot { seconds: *seconds })?;
             rechaza_si_error(&resp)?;
             if let Response::Snapshot { samples } = &resp {
@@ -615,6 +630,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         "⏱ now",
                         None,
                         fields.as_deref(),
+                        no_header,
                     ));
                 }
             }
@@ -623,6 +639,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
         Cmd::Total { rango, all, salida } => {
             let fields = fields_para::<caudalghost_core::proto::TotalRow>(salida)?;
             let (campo, rev) = orden_para::<caudalghost_core::proto::TotalRow>(salida)?;
+            let no_header = no_header_para(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -648,6 +665,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     &format!("Σ rango: {rango}"),
                     None,
                     fields.as_deref(),
+                    no_header,
                 ));
             }
             Ok(())
@@ -660,6 +678,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
         } => {
             let fields = fields_para::<caudalghost_core::proto::AppRow>(salida)?;
             let (campo, rev) = orden_para::<caudalghost_core::proto::AppRow>(salida)?;
+            let no_header = no_header_para(salida)?;
             let rango = rango_de_top(cli);
             match (rango, seconds) {
                 (Some(rango), None) => {
@@ -685,6 +704,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             &format!("⛰ top apps · rango: {rango}"),
                             *limit,
                             fields.as_deref(),
+                            no_header,
                         ));
                     }
                     Ok(())
@@ -710,6 +730,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                             &format!("⛰ top apps · {etiqueta}"),
                             *limit,
                             fields.as_deref(),
+                            no_header,
                         ));
                     }
                     Ok(())
@@ -725,6 +746,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
         } => {
             let fields = fields_para::<caudalghost_core::proto::RemoteRow>(salida)?;
             let (campo, rev) = orden_para::<caudalghost_core::proto::RemoteRow>(salida)?;
+            let no_header = no_header_para(salida)?;
             let w = resolver_rango(rango)?;
             let resp = llamar(
                 &socket,
@@ -758,6 +780,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                     &etiqueta,
                     *limit,
                     fields.as_deref(),
+                    no_header,
                 ));
             }
             Ok(())
@@ -773,6 +796,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                 ));
             }
             let fields = fields_para::<render::SerieRow>(salida)?;
+            let no_header = no_header_para(salida)?;
             let w = resolver_rango(rango)?;
             let bucket = bucket.map(Bucket::from).unwrap_or_else(|| {
                 range::pick_bucket(w.start, w.end, chrono::Local::now().timestamp())
@@ -823,6 +847,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         "",
                         None,
                         None,
+                        false,
                     ));
                 } else {
                     imprimir(&render::emitir(
@@ -834,6 +859,7 @@ fn run(cli: &Cli) -> Result<(), SalidaError> {
                         &titulo_txt,
                         None,
                         fields.as_deref(),
+                        no_header,
                     ));
                 }
             }
@@ -1262,6 +1288,7 @@ mod tests {
             "now",
             None,
             None,
+            false,
         );
         assert!(j.contains("\"schema\""));
     }
