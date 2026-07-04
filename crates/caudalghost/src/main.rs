@@ -243,11 +243,13 @@ impl From<BucketArg> for Bucket {
 #[derive(Subcommand)]
 enum Cmd {
     /// Verifica conexión con el daemon
+    #[command(after_help = "Ejemplo:\n  caudalghost ping -o json")]
     Ping {
         #[command(flatten)]
         salida: OpcionesSalida,
     },
     /// Actividad de los últimos segundos
+    #[command(after_help = "Ejemplo:\n  caudalghost now -o json")]
     Now {
         #[arg(long, default_value_t = 60)]
         seconds: u32,
@@ -258,6 +260,7 @@ enum Cmd {
         salida: OpcionesSalida,
     },
     /// Totales por rango
+    #[command(after_help = "Ejemplo:\n  caudalghost total hoy -o csv")]
     Total {
         /// Rango histórico. Tokens válidos (ver más abajo).
         #[arg(value_name = "RANGO", long_help = ayuda_rango())]
@@ -269,11 +272,14 @@ enum Cmd {
         salida: OpcionesSalida,
     },
     /// Top de aplicaciones: por rango histórico o ventana en vivo
-    #[command(group(
-        clap::ArgGroup::new("rango_top")
-            .args(["rango_pos", "rango_flag"])
-            .multiple(false)
-    ))]
+    #[command(
+        group(
+            clap::ArgGroup::new("rango_top")
+                .args(["rango_pos", "rango_flag"])
+                .multiple(false)
+        ),
+        after_help = "Ejemplo:\n  caudalghost top 7d -n 10 --sort rx"
+    )]
     Top {
         /// Rango histórico. Excluyente con --rango y --seconds. Tokens válidos (ver más abajo).
         #[arg(value_name = "RANGO", conflicts_with = "seconds", long_help = ayuda_rango())]
@@ -291,6 +297,7 @@ enum Cmd {
         salida: OpcionesSalida,
     },
     /// Top de hosts remotos por rango; opcionalmente filtrado por app
+    #[command(after_help = "Ejemplo:\n  caudalghost hosts hoy --app firefox -o ndjson")]
     Hosts {
         /// Rango histórico. Tokens válidos (ver más abajo).
         #[arg(value_name = "RANGO", long_help = ayuda_rango())]
@@ -305,6 +312,7 @@ enum Cmd {
         salida: OpcionesSalida,
     },
     /// Serie temporal del caudal total por rango (sparkline + tabla)
+    #[command(after_help = "Ejemplo:\n  caudalghost serie 7d --bucket day")]
     Serie {
         /// Rango histórico. Tokens válidos (ver más abajo).
         #[arg(value_name = "RANGO", long_help = ayuda_rango())]
@@ -1340,6 +1348,24 @@ mod tests {
         let mut total = cmd.find_subcommand_mut("total").unwrap().clone();
         let help = total.render_help().to_string();
         assert!(help.contains("--output") && help.contains("--units"));
+    }
+
+    #[test]
+    fn subcomandos_muestran_ejemplo_en_help() {
+        use clap::CommandFactory;
+        for (nombre, aguja) in [
+            ("top", "caudalghost top"),
+            ("serie", "caudalghost serie"),
+            ("hosts", "caudalghost hosts"),
+        ] {
+            let mut cmd = super::Cli::command();
+            let mut sub = cmd.find_subcommand_mut(nombre).unwrap().clone();
+            let help = sub.render_long_help().to_string();
+            assert!(
+                help.contains("Ejemplo") && help.contains(aguja),
+                "{nombre}: {help}"
+            );
+        }
     }
 
     #[test]
