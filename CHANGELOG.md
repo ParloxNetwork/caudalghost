@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.7.4] — 2026-07-04
+
+### CLI — pulido (cliente-only, sin cambios en el daemon ni el protocolo)
+
+- **Ordenar por columna `--sort <campo>` + `--reverse`/`-r`:** ordena las listas por `app`/`host`/`interfaz`,
+  `rx`, `tx` o `total`. Por defecto **descendente** (mayor→menor / Z→A); `--reverse` invierte a ascendente
+  (y solo, sin `--sort`, invierte el orden por defecto del comando). Aplica a `top`, `hosts`, `total` y `now`;
+  `serie` (cronológica) y `ping` lo rechazan con un mensaje claro. Sin `--sort`, el orden por defecto (ranking
+  por total) no cambia.
+- **`--no-header`:** omite la línea de cabecera en `-o csv` (para pipelines que solo quieren datos). Fuera de
+  csv → error claro. Sin la opción, el csv sale igual que antes.
+- **Ejemplos en `--help`:** cada subcomando de datos (`ping/now/total/top/hosts/serie`) muestra ahora una
+  invocación de ejemplo al pie de su `--help`.
+
 ## [0.7.3] — 2026-07-03
 
 ### Presentación y empaquetado (sin cambios en el daemon ni el protocolo)
