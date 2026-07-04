@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.7.3] — 2026-07-03
+
+### Presentación y empaquetado (sin cambios en el daemon ni el protocolo)
+
+- **README de portada** (`README.md`) bilingüe **español/inglés**: presenta la app (no es documentación —
+  eso vive en el sitio) con banner de marca **adaptable al tema** de GitHub (variante clara del lockup),
+  previews de terminal con datos de ejemplo, instalación de las dos ediciones `.deb`, nota de privacidad y
+  la firma de Parlox Network. Enlaza a [caudalghost.parlox.net](https://caudalghost.parlox.net).
+- **Metadatos de creador/maintainer** más completos para los instaladores gráficos (Discover, GNOME
+  Software) y `apt`:
+  - **Síntesis del paquete** real (antes era el marcador `[generated from Rust crate …]`).
+  - La **página de manual** incluye ahora la sección `AUTHORS` (Parlox Network).
+  - `authors` a nivel de workspace en los metadatos de Cargo.
+  - **AppStream** enriquecido: categorías, palabras clave y bloque de **novedades** por versión.
+  - `.desktop` sin la advertencia de doble categoría principal.
+
 ## [0.7.2] — 2026-07-03
 
 ### CLI — features (cliente-only, sin tocar el daemon ni el protocolo)
