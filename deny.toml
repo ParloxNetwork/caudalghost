@@ -6,9 +6,10 @@
 # vía el grafo de dependencias de dev/build, caudalghost-ebpf). La GUI
 # (crates/caudalghost-gui/src-tauri) es un crate/paquete standalone con su
 # propio Cargo.lock (npm + cargo aparte): NO se unifica con este lock ni se
-# audita aquí; su dependencia RUSTSEC conocida (glib, vía Tauri/gtk-rs) se
-# documenta en audit.toml y en SECURITY.md, y su npm audit corre por
-# separado en security.yml (job npm-audit-gui).
+# audita con cargo-deny aquí. Su superficie SÍ se vigila aparte en security.yml:
+# cargo-audit sobre su Cargo.lock (informativo — job cargo-audit) + npm audit del
+# frontend (job npm-audit-gui). Los advisories transitivos conocidos de esa pila
+# (glib y demás, vía Tauri/gtk-rs) se documentan en audit.toml y en SECURITY.md.
 
 [graph]
 all-features = false
