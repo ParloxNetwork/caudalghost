@@ -1,0 +1,69 @@
+# Configuración de cargo-deny (supply-chain: advisories, licencias, bans,
+# fuentes de dependencias).
+#
+# Corre sobre el workspace principal (Cargo.toml raíz / default-members):
+# caudalghost-core, caudalghostd, caudalghost, caudalghost-ebpf-common (y,
+# vía el grafo de dependencias de dev/build, caudalghost-ebpf). La GUI
+# (crates/caudalghost-gui/src-tauri) es un crate/paquete standalone con su
+# propio Cargo.lock (npm + cargo aparte): NO se unifica con este lock ni se
+# audita con cargo-deny aquí. Su superficie SÍ se vigila aparte en security.yml:
+# cargo-audit sobre su Cargo.lock (informativo — job cargo-audit) + npm audit del
+# frontend (job npm-audit-gui). Los advisories transitivos conocidos de esa pila
+# (glib y demás, vía Tauri/gtk-rs) se documentan en audit.toml y en SECURITY.md.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+# Postura inicial pre-1.0: avisar (no bloquear) sobre paquetes sin
+# mantenimiento o con notice, pero SÍ bloquear vulnerabilidades salvo la
+# excepción trackeada explícitamente. La excepción vive en audit.toml (que
+# usa `cargo audit`), no aquí; cargo-deny no tiene su propia allowlist de
+# CVEs en esta versión de config, así que si en el futuro emite un
+# "vulnerability" duplicado de RUSTSEC-2024-0429 (glib, solo GUI), añadirlo
+# aquí también.
+unmaintained = "warn"
+notice = "warn"
+vulnerability = "deny"
+ignore = [
+    # glib 0.18.5 (transitivo vía Tauri/gtk-rs en el GUI standalone).
+    # Ver audit.toml y SECURITY.md para el detalle completo.
+    "RUSTSEC-2024-0429",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# Conjunto típico del ecosistema Rust + las licencias reales usadas en este
+# workspace: AGPL-3.0-only (código propio), GPL-2.0-only (crate eBPF),
+# MIT (caudalghost-ebpf-common) y las habituales de dependencias transitivas.
+allow = [
+    "AGPL-3.0",
+    "GPL-2.0",
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+
+[bans]
+# Postura inicial: avisar sobre versiones múltiples de un mismo crate en el
+# árbol de dependencias (normal en un workspace con varias deps de terceros
+# grandes tipo aya/tokio); endurecer a "deny" más adelante si se decide
+# perseguir duplicados activamente.
+multiple-versions = "warn"
+wildcards = "warn"
+deny = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

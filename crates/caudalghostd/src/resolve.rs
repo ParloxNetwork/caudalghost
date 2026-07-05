@@ -325,4 +325,31 @@ mod tests {
             serde_json::from_str(r#"{"state":"success","answer":[]}"#).unwrap();
         assert!(parse_monitor_answer(&v2).is_empty());
     }
+
+    /// `parse_monitor_answer` recibe JSON influido por la RED (respuestas DNS del
+    /// monitor varlink de systemd-resolved). Frontera semi-no-confiable: ante un
+    /// `Value` con estructura/tipos/longitudes inesperados NUNCA debe paniquear
+    /// (índice fuera de rango en `address`, overflow, tipos cruzados). Red de
+    /// regresión determinista; el fuzzing profundo vive en `fuzz/` (resolve_monitor).
+    #[test]
+    fn parse_monitor_answer_no_paniquea_con_json_adversarial() {
+        let casos = [
+            r#"null"#,
+            r#"{}"#,
+            r#"[]"#,
+            r#"{"answer":"no-es-array"}"#,
+            r#"{"answer":[null,1,"x",[]]}"#,
+            r#"{"answer":[{"rr":null}]}"#,
+            r#"{"answer":[{"rr":{"key":{"type":1},"address":[1,2,3]}}]}"#, // A con 3 bytes
+            r#"{"answer":[{"rr":{"key":{"type":1},"address":[1,2,3,4,5,6]}}]}"#, // A con 6 bytes
+            r#"{"answer":[{"rr":{"key":{"type":28},"address":[1,2,3,4]}}]}"#, // AAAA con 4 bytes
+            r#"{"answer":[{"rr":{"key":{"type":1},"address":[999,-1,2,3]}}]}"#, // fuera de u8 / negativo
+            r#"{"question":42,"answer":[{"rr":{"key":{"type":1,"name":"h."},"address":[8,8,8,8]}}]}"#,
+            r#"{"answer":[{"rr":{"key":{"type":99999999999},"address":[]}}]}"#, // tipo enorme, addr vacío
+        ];
+        for c in casos {
+            let v: serde_json::Value = serde_json::from_str(c).unwrap();
+            let _ = parse_monitor_answer(&v); // no debe paniquear
+        }
+    }
 }

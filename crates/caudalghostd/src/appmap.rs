@@ -20,19 +20,25 @@ fn sanitize_label(s: &str) -> String {
 pub fn app_from_cgroup(line: &str) -> Option<String> {
     let path = line.strip_prefix("0::")?;
     let last = path.rsplit('/').next()?;
-    if let Some(rest) = last.strip_prefix("app-flatpak-") {
-        return Some(clean_app_unit(rest));
+    let label = if let Some(rest) = last.strip_prefix("app-flatpak-") {
+        clean_app_unit(rest)
+    } else if let Some(rest) = last.strip_prefix("app-") {
+        clean_app_unit(rest)
+    } else if let Some(rest) = last.strip_prefix("snap.") {
+        rest.split('.').next().unwrap_or("").to_string()
+    } else if let Some(name) = last.strip_suffix(".service") {
+        name.to_string()
+    } else {
+        return None;
+    };
+    // Casos límite que producen etiqueta vacía ('app-.scope', 'snap.', '.service'
+    // exacto): no son una app real. Devolver None (cae a comm/(desconocido)) en
+    // vez de mezclar el tráfico de procesos distintos bajo la clave "".
+    if label.is_empty() {
+        None
+    } else {
+        Some(label)
     }
-    if let Some(rest) = last.strip_prefix("app-") {
-        return Some(clean_app_unit(rest));
-    }
-    if let Some(rest) = last.strip_prefix("snap.") {
-        return rest.split('.').next().map(str::to_string);
-    }
-    if let Some(name) = last.strip_suffix(".service") {
-        return Some(name.to_string());
-    }
-    None
 }
 
 /// Limpia un nombre de unidad systemd ya sin el prefijo app-/app-flatpak-:
@@ -175,6 +181,49 @@ mod tests {
         assert_eq!(
             app_from_cgroup("0::/system.slice/tailscaled.service"),
             Some("tailscaled".into())
+        );
+    }
+
+    /// `app_from_cgroup` parsea rutas de cgroup (semi-no-confiable: un proceso
+    /// puede disponer su cgroup). Es pura; ante entradas raras NUNCA debe
+    /// paniquear ni colgarse. Red de regresión; el fuzzing vive en `fuzz/`.
+    #[test]
+    fn app_from_cgroup_no_paniquea_con_entradas_raras() {
+        let gigante = format!("0::/app-{}.scope", "a".repeat(10_000));
+        let casos: Vec<String> = vec![
+            "".into(),
+            "0::".into(),
+            "0::/".into(),
+            "0:://////".into(),
+            "0::/app-".into(),
+            "0::/snap.".into(),
+            "0::/.service".into(),
+            "0::/app-flatpak-.scope".into(),
+            "0::/app-@.service".into(),
+            "0::/app-a@b@c-1d.scope".into(),
+            "0::/app-\\x2d\\x2d.scope".into(),
+            "0::/💥.service".into(),
+            "0::/app-\u{0}\u{1b}.scope".into(),
+            "sin-prefijo-0::".into(),
+            gigante,
+        ];
+        for c in &casos {
+            let _ = super::app_from_cgroup(c); // no debe paniquear
+        }
+    }
+
+    /// Casos límite que antes producían `Some("")` (mezclando tráfico de procesos
+    /// distintos bajo la clave vacía) ahora devuelven `None` → caen a
+    /// comm/(desconocido). Preserva la pureza de la función.
+    #[test]
+    fn cgroup_sin_nombre_no_produce_etiqueta_vacia() {
+        assert_eq!(app_from_cgroup("0::/user.slice/app.slice/app-.scope"), None);
+        assert_eq!(app_from_cgroup("0::/system.slice/.service"), None);
+        assert_eq!(app_from_cgroup("0::/system.slice/snap."), None);
+        // Control: un scope con nombre real sigue resolviendo bien.
+        assert_eq!(
+            app_from_cgroup("0::/user.slice/app.slice/app-code-1a2b.scope"),
+            Some("code".into())
         );
     }
 

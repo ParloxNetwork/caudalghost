@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability de la ventana principal. Allowlist mínima: solo los comandos core que la UI usa (control de ventana). Se niega explícitamente el toggle interno de devtools como defensa en profundidad (en release ya no se compilan, features=[]).",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,6 +10,7 @@
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:webview:deny-internal-toggle-devtools"
   ]
 }

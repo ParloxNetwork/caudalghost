@@ -1,0 +1,78 @@
+name: CI
+
+# CI del workspace de Rust. Dos jobs separados a propósito:
+#   - `test`: los crates que compilan para el host sin dependencias eBPF
+#     (rápido, fiable, siempre debe pasar en verde).
+#   - `daemon-ebpf`: build/test de `caudalghostd`, que dispara build.rs
+#     (aya-build) y compila el crate `caudalghost-ebpf` para el target BPF.
+#     Necesita toolchain nightly + rust-src + bpf-linker; puede ser más
+#     lento y más frágil (ver nota en ese job).
+#
+# La GUI (crates/caudalghost-gui/src-tauri) tiene su propio Cargo.lock y
+# vive fuera de este workspace: no se construye aquí.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: fmt + clippy + test (sin eBPF)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Rust stable (rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy (crates sin eBPF)
+        run: cargo clippy -p caudalghost-core -p caudalghost --all-targets -- -D warnings
+
+      - name: cargo test (crates sin eBPF)
+        run: cargo test -p caudalghost-core -p caudalghost
+
+  daemon-ebpf:
+    name: caudalghostd (build+test con toolchain eBPF)
+    runs-on: ubuntu-latest
+    # NOTA: este job compila el crate BPF vía build.rs (aya-build), lo que
+    # requiere un toolchain nightly con `rust-src` y el linker `bpf-linker`.
+    # Es más lento (compila bpf-linker desde cero) y puede necesitar ajuste
+    # en su primera ejecución real en GitHub Actions (versión de nightly,
+    # paquetes del runner, etc.). Se mantiene como job separado para que un
+    # fallo aquí no bloquee el job rápido `test` de arriba.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: daemon-ebpf
+
+      - name: Instalar bpf-linker
+        run: cargo install bpf-linker
+
+      - name: cargo build -p caudalghostd
+        run: cargo build -p caudalghostd
+
+      - name: cargo test -p caudalghostd
+        run: cargo test -p caudalghostd

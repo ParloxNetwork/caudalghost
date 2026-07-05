@@ -1,0 +1,40 @@
+[package]
+name = "caudalghost-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+caudalghost-core = { path = "../crates/caudalghost-core" }
+caudalghostd = { path = "../crates/caudalghostd" }
+
+# Cada target de fuzz es un binario. proto_request solo necesita caudalghost-core
+# (sin eBPF); appmap depende de caudalghostd (su build compila el eBPF).
+[[bin]]
+name = "proto_request"
+path = "fuzz_targets/proto_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "appmap"
+path = "fuzz_targets/appmap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "resolve_monitor"
+path = "fuzz_targets/resolve_monitor.rs"
+test = false
+doc = false
+bench = false
+
+# Workspace propio (convención cargo-fuzz): se excluye del workspace padre.
+[workspace]
