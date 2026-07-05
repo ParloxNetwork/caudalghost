@@ -23,7 +23,15 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # Remapeo de rutas embebidas: los binarios PÚBLICOS de las .deb no deben filtrar
 # /home/<dev>/.cargo/... ni el path del proyecto (fuga del usuario del dev) — y es
 # un paso hacia builds reproducibles. Mapea el HOME del dev a un prefijo neutro en
-# TODA la compilación de release (daemon, CLI y GUI). Preserva RUSTFLAGS previo.
+# el código de HOST de release (daemon, CLI y GUI). Preserva RUSTFLAGS previo.
+#
+# LIMITACIÓN CONOCIDA: este remap NO alcanza al objeto eBPF embebido. aya-build
+# compila crates/caudalghost-ebpf en un cargo anidado fijando su propio
+# CARGO_ENCODED_RUSTFLAGS (con prioridad sobre RUSTFLAGS), así que el remap se
+# ignora para ese sub-build. Resultado verificado: CLI y GUI quedan 100% limpias;
+# el daemon shippeado solo retiene rutas del dev DENTRO del blob BPF (aya-ebpf,
+# rust-src nightly, path del proyecto). Cerrarlo exigiría tocar el toolchain del
+# eBPF (riesgo de romper el kprobe), así que se documenta en vez de forzarlo.
 export RUSTFLAGS="--remap-path-prefix=$HOME=/home/build ${RUSTFLAGS:-}"
 
 target="${1:-both}"

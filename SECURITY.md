@@ -43,11 +43,15 @@ petición malformada de un cliente jamás debe tumbar el daemon (a lo sumo cierr
 
 Por honestidad, los documentamos en vez de esconderlos:
 
-- **`RUSTSEC-2024-0429` (glib 0.18.5) — *unsoundness* en `glib::VariantStrIter`.** Afecta **solo a la edición
-  GUI** (dependencia transitiva de Tauri/gtk-rs); el daemon, la CLI y la edición servidor **no** enlazan glib.
-  El código propio de la GUI **no** usa esa API, así que la explotabilidad práctica se limita a la ruta interna
-  de gtk-rs/webkit2gtk. El arreglo (glib ≥ 0.20) está **bloqueado aguas arriba** (wry fija webkit2gtk=2.0.2 y
-  gtk=0.18): forzarlo rompería la GUI. **Trackeado**: se actualizará cuando Tauri/wry migren su pila gtk-rs.
+- **Pila transitiva de la edición GUI (gtk-rs/wry) — advisories aguas arriba.** Afecta **solo a la edición GUI**;
+  el daemon, la CLI y la edición servidor **no** enlazan esa pila. Incluye: `RUSTSEC-2024-0429` (*unsoundness* en
+  `glib::VariantStrIter`, que nuestro código **no** usa), `RUSTSEC-2026-0194`/`-0195` (DoS por complejidad
+  cuadrática y por memoria en `quick-xml` al parsear **XML no confiable**) y crates gtk-rs (`atk`, `gdk`, …)
+  marcados **sin mantenimiento**. En nuestro uso **no hay ruta de explotación práctica**: la GUI no parsea XML de
+  red y no tiene entrada de red (habla con el daemon por socket Unix en JSON; la WebView solo carga activos
+  empaquetados). Los arreglos están **bloqueados aguas arriba** (wry fija webkit2gtk=2.0.2 y gtk=0.18): forzarlos
+  rompería la GUI. **Trackeado**: el CI ahora **audita el `Cargo.lock` de la GUI** (informativo) para vigilar esta
+  superficie, y se endurecerá a bloqueante cuando Tauri/wry migren su pila gtk-rs.
 - **Reutilización de PID en la atribución por app.** La atribución cgroup→app es *best-effort*: entre que el
   kernel entrega un PID y se lee `/proc`, ese PID pudo reciclarse. Puede atribuir mal tráfico en casos raros;
   es una limitación conocida, no un fallo de seguridad.
@@ -96,18 +100,22 @@ Being pre-1.0, security support targets the **latest released version**. Update 
 - **Local data** — history lives in SQLite on your machine. Nothing leaves the box.
 - **Minimal surface** — hardened systemd sandbox; the GUI exposes only **read-only** commands under a strict CSP;
   dependencies sourced from crates.io.
-- **Free & auditable** — AGPL-3.0 (the eBPF piece, GPL-2.0).
+- **Free & auditable** — AGPL-3.0 (the eBPF piece, GPL-2.0). You can read, compile and verify everything.
 
 **Trust boundary:** the security boundary is the **daemon**; clients are unprivileged. A malformed client
 request must never crash the daemon (at most it closes that connection).
 
 ### Known & accepted risks
 
-- **`RUSTSEC-2024-0429` (glib 0.18.5)** — unsoundness in `glib::VariantStrIter`. Affects **only the GUI edition**
-  (transitive via Tauri/gtk-rs); the daemon, CLI and server edition don't link glib. Our GUI code doesn't use
-  that API, so practical exploitability is limited to gtk-rs/webkit2gtk internals. The fix (glib ≥ 0.20) is
-  **gated upstream** (wry pins webkit2gtk=2.0.2, gtk=0.18) — forcing it would break the GUI. **Tracked**: it'll
-  be updated once Tauri/wry move their gtk-rs stack.
+- **GUI edition transitive stack (gtk-rs/wry) — upstream advisories.** Affects **only the GUI edition**; the
+  daemon, CLI and server edition don't link this stack. Includes: `RUSTSEC-2024-0429` (unsoundness in
+  `glib::VariantStrIter`, which our code doesn't use), `RUSTSEC-2026-0194`/`-0195` (quadratic-time and
+  memory-exhaustion DoS in `quick-xml` when parsing **untrusted XML**), and gtk-rs crates (`atk`, `gdk`, …) flagged
+  **unmaintained**. In our usage there is **no practical exploitation path**: the GUI parses no network XML and has
+  no network input (it talks to the daemon over a Unix socket in JSON; the WebView only loads bundled assets). The
+  fixes are **gated upstream** (wry pins webkit2gtk=2.0.2, gtk=0.18) — forcing them would break the GUI.
+  **Tracked**: CI now **audits the GUI `Cargo.lock`** (informational) to watch this surface, and will be tightened
+  to blocking once Tauri/wry move their gtk-rs stack.
 - **PID reuse in app attribution** — cgroup→app attribution is best-effort; a recycled PID can occasionally
   mis-attribute traffic. A known limitation, not a security flaw.
 - **Very long app-label collision** — app names are capped (128 chars); two apps sharing a very long prefix

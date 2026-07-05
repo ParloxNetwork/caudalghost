@@ -18,12 +18,14 @@ test de regresión fija el sandbox de la unit systemd de 0.3.0.
   `CAP_BPF`/`CAP_PERFMON`, `NoNewPrivileges`, `RestrictAddressFamilies`, `ProtectSystem=strict`, filtro de
   syscalls) y **veta reintroducir directivas que rompan el eBPF** (`MemoryDenyWriteExecute`, `PrivateUsers`,
   `DynamicUser`, `ProtectProc=invisible`, denylist de syscalls).
-- **Fuzzing.** Harness `cargo-fuzz` sobre los límites de input no confiable — el parser del protocolo IPC y la
-  atribución cgroup→app — más pruebas adversariales deterministas en el suite. Verificado: **1.58M ejecuciones
-  sin una sola caída**.
+- **Fuzzing.** Harness `cargo-fuzz` sobre los límites de input no confiable — el parser del protocolo IPC, la
+  atribución cgroup→app y el parser de respuestas del monitor de systemd-resolved (`parse_monitor_answer`,
+  influido por DNS) — más pruebas adversariales deterministas en el suite. Verificado: **1.58M ejecuciones sin
+  una sola caída**.
 - **Cadena de suministro / CI.** Workflows de **CI** (fmt, clippy, tests; job aparte para el eBPF) y de
-  **seguridad** (`cargo-audit`, `cargo-deny`, `gitleaks`, `semgrep`, `npm audit` de la GUI y un guard de
-  superficie de la GUI). MSRV declarado (`rust-version = 1.96`).
+  **seguridad** (`cargo-audit` sobre el workspace **y el `Cargo.lock` de la GUI** —informativo, cierra un punto
+  ciego donde vivía glib—, `cargo-deny`, `gitleaks`, `semgrep`, `npm audit` de la GUI, y un guard de superficie de
+  la GUI corregido a los namespaces reales de permisos de Tauri v2). MSRV declarado (`rust-version = 1.96`).
 - **GUI.** Se **niegan explícitamente las devtools internas** (defensa en profundidad; en release ya no se
   compilan, `features=[]`); las *capabilities* quedan como allowlist mínima de comandos de **solo lectura**.
 - **Builds sin fugas de rutas.** `--remap-path-prefix` en el pipeline de release: los binarios publicados dejan

@@ -29,5 +29,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "resolve_monitor"
+path = "fuzz_targets/resolve_monitor.rs"
+test = false
+doc = false
+bench = false
+
 # Workspace propio (convención cargo-fuzz): se excluye del workspace padre.
 [workspace]

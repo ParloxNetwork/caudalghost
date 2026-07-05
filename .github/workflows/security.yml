@@ -32,8 +32,23 @@ jobs:
       - name: Instalar cargo-audit
         run: cargo install cargo-audit --locked
 
-      - name: cargo audit (usa audit.toml del repo)
+      - name: cargo audit (workspace raíz — usa audit.toml del repo)
         run: cargo audit
+
+      - name: cargo audit — backend de la GUI (Cargo.lock de Tauri)
+        # La edición GUI tiene su propio lockfile FUERA del workspace raíz: aquí
+        # viven glib/tauri/wry/webkit2gtk-rs/gtk-rs/soup/quick-xml. Sin este paso
+        # esa superficie NUNCA se auditaba (punto ciego). Corre desde la raíz, así
+        # que aplica el mismo audit.toml.
+        #
+        # INFORMATIVO (no bloquea) por ahora: esa pila arrastra advisories
+        # transitivos que dependen de que Tauri/wry actualicen su stack gtk-rs
+        # pineado (glib unsoundness, quick-xml DoS, crates gtk-rs sin mantener) —
+        # ninguno alcanzable en nuestro uso (la GUI no parsea XML de red ni tiene
+        # entrada de red). Se SURFACEAN aquí y se trackean en SECURITY.md; misma
+        # postura que npm-audit-gui. Endurecer a bloqueante cuando Tauri migre.
+        continue-on-error: true
+        run: cargo audit --file crates/caudalghost-gui/src-tauri/Cargo.lock
 
   cargo-deny:
     name: cargo-deny (licencias, bans, sources)
@@ -133,12 +148,19 @@ jobs:
           fi
 
           if [ -f "$caps" ]; then
-            for perm in "core:shell" "core:fs" "core:http" "allow-create-webview"; do
-              if grep -q "$perm" "$caps"; then
-                echo "::error file=$caps::La GUI ganó el permiso peligroso '$perm'; revisar si es intencional."
-                fail=1
-              fi
-            done
+            # Tauri v2 namespaca los permisos de plugin por el nombre del plugin
+            # ("fs:...", "shell:...", "http:...", "websocket:...", "process:..."),
+            # NO como "core:fs"/"core:shell". Cazamos cualquier permiso otorgado a
+            # esos plugins peligrosos (dan acceso a disco/proceso/red arbitrarios).
+            if grep -qE '"(fs|shell|http|websocket|process|updater|upload):' "$caps"; then
+              echo "::error file=$caps::La GUI ganó un permiso de plugin peligroso (fs/shell/http/websocket/process/...); revisar si es intencional."
+              fail=1
+            fi
+            # Creación de webviews/ventanas nuevas en runtime (amplía superficie).
+            if grep -qE 'allow-create-webview|webview:allow-create' "$caps"; then
+              echo "::error file=$caps::La GUI ganó permiso de crear webviews en runtime; revisar si es intencional."
+              fail=1
+            fi
           fi
 
           if [ -f "$manifest" ] && grep -qE '^\s*tauri-plugin-' "$manifest"; then
