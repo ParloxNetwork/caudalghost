@@ -112,7 +112,7 @@ fn etiqueta_modo(mode: Mode, focus: Focus) -> String {
                 Focus::Grafico => "grafico",
                 Focus::Apps => "apps",
                 Focus::Interfaces => "ifaces",
-                Focus::Servidores => "servidores",
+                Focus::Servidores => "hosts",
             };
             format!("[ZOOM {panel}]")
         }
@@ -925,9 +925,9 @@ fn draw_servidores(frame: &mut Frame, model: &LiveModel, area: Rect) {
         let block =
             Block::default()
                 .borders(Borders::ALL)
-                .title(titulo_panel("servidores", "ahora", None));
+                .title(titulo_panel("hosts", "ahora", None));
         let aviso = Paragraph::new(Line::from(Span::styled(
-            "eBPF inactivo — corre el daemon con sudo para ver servidores",
+            "eBPF inactivo — corre el daemon con sudo para ver hosts",
             Style::default().fg(Color::Yellow),
         )))
         .wrap(Wrap { trim: true })
@@ -947,7 +947,7 @@ fn draw_servidores(frame: &mut Frame, model: &LiveModel, area: Rect) {
             (items, "histórico", (tok != "todo").then(|| tok.to_string()))
         }
     };
-    let titulo = titulo_panel("servidores", ambito, extra.as_deref());
+    let titulo = titulo_panel("hosts", ambito, extra.as_deref());
     let sel = (model.focus == Focus::Servidores).then_some(model.selected_row);
     draw_hist_panel(frame, area, &titulo, "host", &items, model.units, sel);
 }
@@ -2051,7 +2051,7 @@ mod tests {
             "banda apps en histórico (vista_apps)"
         );
         assert!(s.contains("megasync"), "dato histórico");
-        assert!(s.contains("servidores"), "banda servidores");
+        assert!(s.contains("hosts"), "banda hosts");
         assert!(s.contains("salir"), "pie");
     }
 
@@ -2584,7 +2584,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_por_defecto_muestra_servidores() {
+    fn dashboard_por_defecto_muestra_hosts() {
         let mut m = LiveModel {
             version: "0.6.4".into(),
             ebpf: true,
@@ -2601,8 +2601,8 @@ mod tests {
         let buf = term.backend().buffer().clone();
         let s: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(
-            s.contains("servidores"),
-            "la vista por defecto muestra la banda de servidores: {s:?}"
+            s.contains("hosts"),
+            "la vista por defecto muestra la banda de hosts: {s:?}"
         );
         assert!(s.contains("CaudalGhost") && s.contains("salir"));
     }

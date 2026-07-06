@@ -16,7 +16,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 authors = ["Parlox Network <jonathan@parlox.net>"]

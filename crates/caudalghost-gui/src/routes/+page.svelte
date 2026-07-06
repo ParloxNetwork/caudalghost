@@ -73,7 +73,7 @@
         </section>
         {#if hosts.length > 0}
           <section class="hosts">
-            <span class="lbl">Servidores · ahora</span>
+            <span class="lbl">Hosts · ahora</span>
             <div class="hlist">
               {#each hosts as h (h.host)}
                 <div class="hrow"><span class="hn">{h.host}</span><span class="hv rx">↓ {formatUnits(h.rx, live.units)}/s</span><span class="hv tx">↑ {formatUnits(h.tx, live.units)}/s</span></div>

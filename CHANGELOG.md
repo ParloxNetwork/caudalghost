@@ -2,6 +2,17 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/). Versionado semántico.
 
+## [0.8.1] — 2026-07-06
+
+### Interfaz — cliente-only (sin cambios en el daemon ni el protocolo)
+
+- **Panel de destinos renombrado `Servidores` → `Hosts`** en la GUI y la TUI (`caudalghost live`). Ese panel se
+  llena **solo** con hosts resueltos por DNS a los que tus apps salieron a conectarse — que a veces incluyen
+  equipos de tu **red local** (un NAS, el router), así que "servidores remotos" resultaba impreciso. **"Hosts"**
+  es correcto en todos los casos (remoto o local), coincide con el nombre interno y con la CLI
+  (`caudalghost hosts`), y es idéntico en inglés. Solo cambia la etiqueta; sin cambios de comportamiento, ni en
+  el daemon, el protocolo o la base de datos (instala como actualización conservando el histórico).
+
 ## [0.8.0] — 2026-07-04
 
 ### Seguridad — segundo endurecimiento (tras 0.3.0)
