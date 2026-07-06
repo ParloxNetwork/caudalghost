@@ -16,14 +16,14 @@
 </script>
 
 <section class="panel">
-  <div class="lbl">servidores remotos · histórico</div>
+  <div class="lbl">Hosts · histórico</div>
   {#if hosts.length > 0}
     <div class="stack">{#each hosts as h (h.name)}<i style="background:{h.color};width:{h.pct}%"></i>{/each}</div>
     {#each hosts as h (h.name)}
       <div class="row"><span class="sw" style="background:{h.color}"></span><span class="nm">{h.name}</span><span class="v rx">↓ {formatUnits(h.rx, live.units)}</span><span class="v tx">↑ {formatUnits(h.tx, live.units)}</span><span class="pct">{h.pct.toFixed(0)}%</span></div>
     {/each}
   {:else if !live.ebpf}
-    <p class="warn">Sin eBPF no puedo ver con qué servidores se habla. Arranca el daemon con privilegios (sudo).</p>
+    <p class="warn">Sin eBPF no puedo ver con qué hosts se habla. Arranca el daemon con privilegios (sudo).</p>
   {:else}
     <p class="empty">Aún no hay hosts registrados en este rango. En cuanto fluya tráfico DNS resuelto, aparecerán aquí.</p>
   {/if}
