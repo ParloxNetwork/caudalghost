@@ -61,9 +61,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar Rust nightly + rust-src
-        uses: dtolnay/rust-toolchain@nightly
+      # Nightly PINEADO a una fecha conocida-buena. Los builds eBPF (aya +
+      # bpf-linker) son muy sensibles al nightly del día: el más reciente
+      # rompe el enlace BPF con frecuencia (el primer intento en CI agarró
+      # 1.99.0-nightly/LLVM 22.1.8 y falló). Esta fecha es la verificada
+      # compilando caudalghostd+eBPF en local (1.98.0-nightly, LLVM 22.1.6,
+      # bpf-linker 0.10.3, exit 0). Subirla a otra nightly conocida-buena
+      # cuando haga falta; no usar `nightly` a secas aquí.
+      - name: Instalar Rust nightly (pineado) + rust-src
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-06-10
           components: rust-src
 
       - name: Cache de cargo
