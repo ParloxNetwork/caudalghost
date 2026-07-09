@@ -52,6 +52,13 @@ Por honestidad, los documentamos en vez de esconderlos:
   empaquetados). Los arreglos están **bloqueados aguas arriba** (wry fija webkit2gtk=2.0.2 y gtk=0.18): forzarlos
   rompería la GUI. **Trackeado**: el CI ahora **audita el `Cargo.lock` de la GUI** (informativo) para vigilar esta
   superficie, y se endurecerá a bloqueante cuando Tauri/wry migren su pila gtk-rs.
+- **Dependencia de *desarrollo* de la GUI (`cookie` vía SvelteKit) — GHSA-pxg6-pf52-xh8x.** Severidad **baja** y
+  **solo build/dev**: `@sveltejs/kit` (el framework del frontend) arrastra `cookie@0.6.0`, que acepta
+  nombre/ruta/dominio de cookie con caracteres fuera de rango. **No viaja en la `.deb`** ni se ejecuta en la
+  máquina del usuario (la GUI no fija cookies; sirve activos empaquetados). `npm audit --omit=dev` reporta **0
+  vulnerabilidades**. El único "arreglo" automático (`npm audit fix --force`) haría un downgrade a
+  `@sveltejs/kit@0.0.30` que rompería la GUI, así que **no** se aplica; se despejará subiendo SvelteKit a
+  `>2.69.2` (con prueba de la GUI). El job `npm-audit-gui` la vigila (informativo).
 - **Reutilización de PID en la atribución por app.** La atribución cgroup→app es *best-effort*: entre que el
   kernel entrega un PID y se lee `/proc`, ese PID pudo reciclarse. Puede atribuir mal tráfico en casos raros;
   es una limitación conocida, no un fallo de seguridad.
@@ -116,6 +123,13 @@ request must never crash the daemon (at most it closes that connection).
   fixes are **gated upstream** (wry pins webkit2gtk=2.0.2, gtk=0.18) — forcing them would break the GUI.
   **Tracked**: CI now **audits the GUI `Cargo.lock`** (informational) to watch this surface, and will be tightened
   to blocking once Tauri/wry move their gtk-rs stack.
+- **GUI *dev* dependency (`cookie` via SvelteKit) — GHSA-pxg6-pf52-xh8x.** **Low** severity and **build/dev
+  only**: `@sveltejs/kit` (the frontend framework) pulls `cookie@0.6.0`, which accepts cookie name/path/domain
+  with out-of-bounds characters. It **does not ship in the `.deb`** and never runs on the user's machine (the GUI
+  sets no cookies; it serves bundled assets). `npm audit --omit=dev` reports **0 vulnerabilities**. The only
+  automatic "fix" (`npm audit fix --force`) would downgrade to `@sveltejs/kit@0.0.30` and break the GUI, so it is
+  **not** applied; it will clear by bumping SvelteKit to `>2.69.2` (with a GUI build test). The `npm-audit-gui`
+  job watches it (informational).
 - **PID reuse in app attribution** — cgroup→app attribution is best-effort; a recycled PID can occasionally
   mis-attribute traffic. A known limitation, not a security flaw.
 - **Very long app-label collision** — app names are capped (128 chars); two apps sharing a very long prefix

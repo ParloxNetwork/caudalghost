@@ -57,14 +57,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Corre sobre el workspace principal (Cargo.toml raíz / default-members).
-      # El GUI (crates/caudalghost-gui/src-tauri) tiene su propio Cargo.lock,
-      # fuera de este workspace, y se audita aparte (ver job npm-audit-gui).
-      - name: cargo-deny check
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
-          arguments: --workspace
+      - name: Instalar Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Instalamos el binario y corremos `cargo deny check` directamente (igual
+      # que el job cargo-audit), en vez de la acción de terceros. Motivos:
+      #  - usa el MISMO binario/versión que en local (reproducible local↔CI),
+      #  - evita el flag `--workspace`, que cargo-deny ya no acepta, y
+      #  - reduce la superficie de acciones de terceros en el pipeline.
+      # cargo-deny lee el workspace raíz por defecto; la GUI (Cargo.lock propio,
+      # fuera del workspace) se audita aparte (jobs cargo-audit / npm-audit-gui).
+      - name: Instalar cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: cargo deny check
+        run: cargo deny check
 
   gitleaks:
     name: gitleaks (secretos)
@@ -75,14 +85,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      # Usamos el binario OSS (MIT) directamente en vez de gitleaks-action@v2:
+      # esa acción EXIGE una licencia de pago (GITLEAKS_LICENSE) para cualquier
+      # repo que pertenezca a una organización — que es nuestro caso
+      # (ParloxNetwork) — y por eso fallaba en 6 s. El binario no requiere
+      # licencia. Pinneamos la versión y escaneamos toda la historia.
+      - name: Gitleaks (binario OSS, historia completa)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No requerido para repos públicos; si en algún momento se exige
-          # licencia (repos de organización privados), añadir el secret
-          # GITLEAKS_LICENSE en la configuración del repo/org.
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git . --no-banner --redact
 
   semgrep:
     name: semgrep (SAST)
@@ -91,12 +106,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Semgrep (p/rust + p/secrets)
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/rust
-            p/secrets
+      - name: Instalar semgrep (CLI OSS)
+        run: pipx install semgrep
+
+      # semgrep-action@v1 está deprecada; corremos el CLI oficial sin token
+      # (las reglas p/rust y p/secrets son del registro público OSS).
+      # --error hace que cualquier hallazgo bloquee; --metrics=off no telemetría.
+      #
+      # Excluimos SOLO `rust.lang.security.unsafe-usage`: es una regla genérica
+      # ("hay un bloque unsafe, audítalo") que en un programa eBPF/systems se
+      # dispara siempre — leer memoria del kernel con bpf_probe_read_kernel y
+      # acceder a mapas BPF EXIGE `unsafe`, no hay alternativa. Ese unsafe está
+      # auditado y documentado (SECURITY.md). Todo lo demás — incluidos secretos
+      # e inyecciones — sigue bloqueando.
+      - name: semgrep scan (p/rust + p/secrets)
+        run: |
+          semgrep scan --error --metrics=off \
+            --config p/rust --config p/secrets \
+            --exclude-rule rust.lang.security.unsafe-usage.unsafe-usage
 
   npm-audit-gui:
     name: npm audit (GUI, Tauri frontend)
