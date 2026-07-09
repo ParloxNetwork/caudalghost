@@ -48,15 +48,25 @@ jobs:
   daemon-ebpf:
     name: caudalghostd (build+test con toolchain eBPF)
     runs-on: ubuntu-latest
-    # NOTA: este job compila el crate BPF vía build.rs (aya-build), lo que
-    # requiere un toolchain nightly con `rust-src` y el linker `bpf-linker`.
-    # Es más lento (compila bpf-linker desde cero) y puede necesitar ajuste
-    # en su primera ejecución real en GitHub Actions (versión de nightly,
-    # paquetes del runner, etc.). Se mantiene como job separado para que un
-    # fallo aquí no bloquee el job rápido `test` de arriba.
+    # INFORMATIVO (no bloquea): compila el crate BPF vía build.rs (aya-build),
+    # que usa `rustup run nightly` (Toolchain::default()) + `-Z build-std` y el
+    # linker `bpf-linker` (se compila desde cero, ~2 min). aya-build EXIGE el
+    # canal `nightly` a secas (no un nightly con nombre de fecha), así que aquí
+    # se instala `nightly`, no una fecha pineada. Como aya-build sigue el nightly
+    # rolling, un nightly futuro podría romper el build BPF en un día dado, al
+    # margen de nuestro código; por eso se mantiene `continue-on-error`. El
+    # daemon+eBPF compila en local y es exactamente lo que se empaqueta en la .deb.
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # libacl1-dev: el daemon enlaza contra -lacl (vía posix-acl/acl-sys, para
+      # las ACLs POSIX del socket). El runner limpio no la trae y el enlace final
+      # falla con "unable to find library -lacl". (El job rápido `test` no la
+      # necesita: no compila caudalghostd.)
+      - name: Instalar libacl (para enlazar el daemon)
+        run: sudo apt-get update && sudo apt-get install -y libacl1-dev
 
       - name: Instalar Rust nightly + rust-src
         uses: dtolnay/rust-toolchain@nightly

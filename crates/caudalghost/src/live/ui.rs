@@ -922,10 +922,9 @@ fn extra_con_rango(seleccion: Option<String>, rango: Option<&str>) -> Option<Str
 fn draw_servidores(frame: &mut Frame, model: &LiveModel, area: Rect) {
     type Items = Vec<(String, u64, u64)>;
     if !model.ebpf {
-        let block =
-            Block::default()
-                .borders(Borders::ALL)
-                .title(titulo_panel("hosts", "ahora", None));
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(titulo_panel("hosts", "ahora", None));
         let aviso = Paragraph::new(Line::from(Span::styled(
             "eBPF inactivo — corre el daemon con sudo para ver hosts",
             Style::default().fg(Color::Yellow),
